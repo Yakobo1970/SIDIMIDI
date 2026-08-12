@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="gfv0IO" name="SIDIMIDI" projectType="guiapp" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" cppLanguageStandard="20"
+              headerPath="ThirdParty/resid&#10;ThirdParty/tinysid&#10;ThirdParty/fake6502"
+              defines="NMOS6502=1&#10;">
+  <MAINGROUP id="h3xFON" name="SIDIMIDI">
+    <GROUP id="{3890CC81-348C-D2F4-B0CF-0E76EEAD4F73}" name="Resources">
+      <FILE id="LHRx2Q" name="sidimidi-ICO.png" compile="0" resource="1"
+            file="../../Users/webma/Desktop/sidimidi-ICO.png"/>
+      <FILE id="ovnlZe" name="sidimidi.gif" compile="0" resource="1" file="../../Users/webma/Desktop/sidimidi.gif"/>
+    </GROUP>
+    <GROUP id="{B3AFDFAC-63BF-2167-74E9-9AA666C81702}" name="Source">
+      <FILE id="ZhIONg" name="AudioPlayerEngine.h" compile="0" resource="0"
+            file="Source/AudioPlayerEngine.h"/>
+      <FILE id="tV4ORO" name="SidCpu6502Engine.h" compile="0" resource="0"
+            file="Source/SidCpu6502Engine.h"/>
+      <FILE id="JKM6se" name="SidCpu6502Engine.cpp" compile="1" resource="0"
+            file="Source/SidCpu6502Engine.cpp"/>
+      <FILE id="fYNusC" name="SidToMidiCore.h" compile="0" resource="0" file="Source/SidToMidiCore.h"/>
+      <FILE id="uDkwFr" name="MidiToSidCore.h" compile="0" resource="0" file="Source/MidiToSidCore.h"/>
+      <FILE id="KeLgKO" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+      <FILE id="vU09cc" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
+      <FILE id="mbgFR4" name="MainComponent.cpp" compile="1" resource="0"
+            file="Source/MainComponent.cpp"/>
+    </GROUP>
+    <GROUP id="{B2235A09-C625-38BE-DB4E-05331A6830FF}" name="ThirdParty">
+      <GROUP id="{BD0FCE92-FB7A-B61E-86C2-2F22069CA673}" name="miniplayer">
+        <GROUP id="{C9D9307E-2F6D-08ED-BC6B-3582AFC40CE0}" name="tools">
+          <FILE id="Qhg1Im" name="dasm.exe" compile="0" resource="0" file="ThirdParty/miniplayer/tools/dasm.exe"/>
+        </GROUP>
+        <!-- Alle folgenden Dateien sind reine Referenz-/Dokumentationsdateien (siehe
+             ThirdParty/miniplayer/README.md) - weder als C++ kompilieren (compile=0) noch als
+             BinaryData einbetten (resource=0), nur im Projekt sichtbar mitführen. -->
+        <FILE id="FzdkF1" name="fileio.c" compile="0" resource="0" file="ThirdParty/miniplayer/fileio.c"/>
+        <FILE id="hpgXJW" name="fileio.h" compile="0" resource="0" file="ThirdParty/miniplayer/fileio.h"/>
+        <FILE id="axx2xS" name="FORMAT_NOTES.md" compile="0" resource="0" file="ThirdParty/miniplayer/FORMAT_NOTES.md"/>
+        <FILE id="CfYX77" name="gcommon.h" compile="0" resource="0" file="ThirdParty/miniplayer/gcommon.h"/>
+        <FILE id="lLvemX" name="gt2mini2.c" compile="0" resource="0" file="ThirdParty/miniplayer/gt2mini2.c"/>
+        <FILE id="Co2jbS" name="LICENSE.txt" compile="0" resource="0" file="ThirdParty/miniplayer/LICENSE.txt"/>
+        <FILE id="tN2uXa" name="minimal_example.s" compile="0" resource="0"
+              file="ThirdParty/miniplayer/minimal_example.s"/>
+        <FILE id="zg3Rvb" name="mw4title.sng" compile="0" resource="0" file="ThirdParty/miniplayer/mw4title.sng"/>
+        <FILE id="FxXZEj" name="player.s" compile="0" resource="0" file="ThirdParty/miniplayer/player.s"/>
+        <FILE id="EIU2KX" name="prgexample.s" compile="0" resource="0" file="ThirdParty/miniplayer/prgexample.s"/>
+        <FILE id="KzH4zm" name="README.md" compile="0" resource="0" file="ThirdParty/miniplayer/README.md"/>
+        <FILE id="IRHPOU" name="sidexample.s" compile="0" resource="0" file="ThirdParty/miniplayer/sidexample.s"/>
+      </GROUP>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_midi_ci" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1"/>
+  <EXPORTFORMATS>
+    <VS2026 targetFolder="Builds/VisualStudio2026" extraCompilerFlags="/Zc:__cplusplus"
+            smallIcon="LHRx2Q" bigIcon="LHRx2Q">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="SIDIMIDI"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="SIDIMIDI"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../../JUCE/modules"/>
+        <MODULEPATH id="juce_midi_ci" path="../../../JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2026>
+  </EXPORTFORMATS>
+</JUCERPROJECT>

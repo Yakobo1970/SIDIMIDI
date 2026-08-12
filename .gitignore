@@ -1,0 +1,23 @@
+# Visual Studio build output & caches
+Builds/*/.vs/
+Builds/*/x64/
+Builds/*/x86/
+Builds/*/Debug/
+Builds/*/Release/
+Builds/*/*.vcxproj.user
+Builds/*/resources.aps
+
+# Generic MSVC/VS artifacts (falls weitere Build-Targets hinzukommen)
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.tlog
+*.idb
+*.iobj
+*.ipdb
+*.log
+.vs/
+
+# Lokale Editor-/Tool-Konfiguration (nicht Teil des Projekts)
+.claude/

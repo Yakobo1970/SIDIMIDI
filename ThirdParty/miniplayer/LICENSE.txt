@@ -1,0 +1,42 @@
+Miniplayer2 (player.s, gt2mini2.c, fileio.c, fileio.h, gcommon.h,
+sidexample.s, prgexample.s, mw4title.sng)
+
+Copyright (c) 2026 Lasse Oorni (cadaver / Covert Bitops)
+Source: https://github.com/cadaver/miniplayer2
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
+
+tools/dasm.exe (DASM macro assembler, prebuilt Windows binary v2.20.17)
+
+Copyright (c) 1988-2002 by Matthew Dillon, (c) 1995 by Olaf "Rhialto"
+Seibert, (c) 2003-2008 by Andrew Davie, (c) 2008 by Peter H. Froehlich, and
+contributors.
+Source/releases: https://github.com/dasm-assembler/dasm
+
+Licensed under the GNU General Public License v2.0 (GPL-2.0). Full license
+text: https://github.com/dasm-assembler/dasm/blob/master/LICENSE
+
+dasm.exe is used here only as an offline build tool (assembling generated
+6502 source into a .sid file during MIDI-to-SID conversion) - it is not
+linked into SIDIMIDI and does not become part of the compiled application.
+Using a GPL-licensed compiler/assembler as a build tool does not place the
+GPL on its input or output; the assembled .sid files it produces are not a
+"derived work" of dasm itself.
