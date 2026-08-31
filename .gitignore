@@ -19,5 +19,8 @@ Builds/*/resources.aps
 *.log
 .vs/
 
+# Inno-Setup-Ausgabe (Installer-Binary gehört auf die GitHub-Release, nicht ins Repo)
+Installer/Output/
+
 # Lokale Editor-/Tool-Konfiguration (nicht Teil des Projekts)
 .claude/
