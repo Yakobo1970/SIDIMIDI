@@ -619,6 +619,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\Source\EmbeddedMiniplayer.cpp">
+      <Filter>SIDIMIDI\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\SidCpu6502Engine.cpp">
       <Filter>SIDIMIDI\Source</Filter>
     </ClCompile>
@@ -3385,6 +3388,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Source\AudioPlayerEngine.h">
+      <Filter>SIDIMIDI\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\EmbeddedMiniplayer.h">
       <Filter>SIDIMIDI\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SidCpu6502Engine.h">

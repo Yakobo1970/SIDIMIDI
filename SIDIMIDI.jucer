@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="gfv0IO" name="SIDIMIDI" projectType="guiapp" useAppConfig="0"
-              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" cppLanguageStandard="20"
-              headerPath="ThirdParty/resid&#10;ThirdParty/tinysid&#10;ThirdParty/fake6502"
-              defines="NMOS6502=1&#10;">
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" cppLanguageStandard="20">
   <MAINGROUP id="h3xFON" name="SIDIMIDI">
     <GROUP id="{3890CC81-348C-D2F4-B0CF-0E76EEAD4F73}" name="Resources">
       <FILE id="LHRx2Q" name="sidimidi-ICO.png" compile="0" resource="1"
@@ -13,6 +11,10 @@
     <GROUP id="{B3AFDFAC-63BF-2167-74E9-9AA666C81702}" name="Source">
       <FILE id="ZhIONg" name="AudioPlayerEngine.h" compile="0" resource="0"
             file="Source/AudioPlayerEngine.h"/>
+      <FILE id="e6PmXd" name="EmbeddedMiniplayer.h" compile="0" resource="0"
+            file="Source/EmbeddedMiniplayer.h"/>
+      <FILE id="e6PmXe" name="EmbeddedMiniplayer.cpp" compile="1" resource="0"
+            file="Source/EmbeddedMiniplayer.cpp"/>
       <FILE id="tV4ORO" name="SidCpu6502Engine.h" compile="0" resource="0"
             file="Source/SidCpu6502Engine.h"/>
       <FILE id="JKM6se" name="SidCpu6502Engine.cpp" compile="1" resource="0"

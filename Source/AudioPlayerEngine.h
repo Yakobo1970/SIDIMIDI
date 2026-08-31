@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 #include "SidToMidiCore.h"
-#include "SidCpU6502Engine.h"
+#include "SidCpu6502Engine.h"
 #include <cmath>
 #include <array>
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "EmbeddedMiniplayer.h"
 #include <vector>
 #include <array>
 #include <algorithm>
@@ -345,9 +346,10 @@ private:
     }
 
     // Sucht ThirdParty/miniplayer relativ zur .exe (mehrere Verzeichnisebenen nach oben,
-    // passend zum Projucer-Build-Layout Builds/VisualStudio2026/<config>/App/*.exe).
-    // TODO: für eine echte Distribution müssten tools/dasm.exe + player.s als Ressourcen
-    // mit der App ausgeliefert werden statt relativ zum Quellbaum gesucht zu werden.
+    // passend zum Projucer-Build-Layout Builds/VisualStudio2026/<config>/App/*.exe). Das
+    // funktioniert nur im Quellbaum eines Entwickler-Checkouts. Für eine installierte App
+    // (z.B. unter Program Files, ohne ThirdParty daneben) greift extractEmbeddedMiniplayer()
+    // als Fallback auf die fest eingebetteten Kopien (EmbeddedMiniplayer.h/.cpp) zurück.
     static bool locateMiniplayerFiles(juce::File& outToolsDir, juce::File& outPlayerSource, juce::String& log)
     {
         auto exeFile = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
@@ -363,8 +365,42 @@ private:
             }
             dir = dir.getParentDirectory();
         }
-        log += "FEHLER: ThirdParty/miniplayer (player.s/tools/dasm.exe) nicht gefunden - relativ zur .exe gesucht.\n";
-        return false;
+        return extractEmbeddedMiniplayer(outToolsDir, outPlayerSource, log);
+    }
+
+    // Schreibt dasm.exe und player.s aus den eingebetteten Ressourcen (EmbeddedMiniplayer)
+    // in einen festen Cache-Ordner im Temp-Verzeichnis und liefert dessen Pfade zurück.
+    // Wird nur als Fallback verwendet, wenn locateMiniplayerFiles() nichts relativ zur
+    // .exe findet (z.B. bei einer Installation ohne mitgelieferten ThirdParty-Ordner).
+    static bool extractEmbeddedMiniplayer(juce::File& outToolsDir, juce::File& outPlayerSource, juce::String& log)
+    {
+        auto cacheDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getChildFile("SIDIMIDI_embedded_miniplayer");
+        auto toolsDir = cacheDir.getChildFile("tools");
+        auto dasmExe = toolsDir.getChildFile("dasm.exe");
+        auto playerS = cacheDir.getChildFile("player.s");
+
+        auto needsWrite = [](const juce::File& f, int expectedSize)
+        {
+            return !f.existsAsFile() || (int)f.getSize() != expectedSize;
+        };
+
+        if (needsWrite(dasmExe, EmbeddedMiniplayer::dasmExeDataSize)
+            || needsWrite(playerS, EmbeddedMiniplayer::playerSDataSize))
+        {
+            toolsDir.createDirectory();
+            if (!dasmExe.replaceWithData(EmbeddedMiniplayer::dasmExeData, (size_t)EmbeddedMiniplayer::dasmExeDataSize)
+                || !playerS.replaceWithData(EmbeddedMiniplayer::playerSData, (size_t)EmbeddedMiniplayer::playerSDataSize))
+            {
+                log += "FEHLER: Eingebettete miniplayer-Ressourcen konnten nicht nach "
+                    + cacheDir.getFullPathName() + " entpackt werden.\n";
+                return false;
+            }
+        }
+
+        outToolsDir = toolsDir;
+        outPlayerSource = playerS;
+        return true;
     }
 
     // Ordnet jeder offenen Note (nur Startzeit bekannt) eine Endzeit über den passenden
