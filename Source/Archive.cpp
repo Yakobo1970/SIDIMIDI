@@ -169,7 +169,8 @@ struct Archive::Scanner
             if (! skip)
             {
                 const auto si = parseSidFile (job.file, false);
-                batch.push_back (makeEntry (job.file, si, job.hvsc.get()));
+                // RSID tunes need a complete C64 (CIA, interrupts, KERNAL) and cannot be played here: they stay out of the list
+                if (! (si.valid && si.rsid)) batch.push_back (makeEntry (job.file, si, job.hvsc.get()));
                 ++analysed;
             }
             ++arch.done;
@@ -550,6 +551,7 @@ void Archive::relocate (Entry& e, const juce::File& newFile)
 Entry* Archive::addFile (const juce::File& f)
 {
     const auto si = parseSidFile (f, false);
+    if (si.valid && si.rsid) return nullptr;
     auto hv = hvscFor (f.getFullPathName());
     auto e = makeEntry (f, si, hv.get());
     markProtection (*e, protectedFolders());
@@ -638,6 +640,7 @@ bool Archive::load()
         for (int k = 0; k < nl; ++k) e->lengths.push_back (is.readFloat());
         e->rating = is.readInt();
         e->favourite = is.readByte() != 0;
+        if ((e->flags & fRsid) != 0) continue;   // RSID files are not kept (see Scanner::work)
         const juce::File f (e->path);
         e->name = f.getFileName();
         e->folder = f.getParentDirectory().getFullPathName();

@@ -41,6 +41,7 @@ MainComponent::MainComponent()
     bannerImage = juce::ImageFileFormat::loadFrom (BinaryData::banner_png, (size_t) BinaryData::banner_pngSize);
 
     setLookAndFeel (&look);
+    juce::LookAndFeel::setDefaultLookAndFeel (&look);   // dialogs (file chooser, alerts) get the colours of the theme too
     applyTheme();
 
     sidPane = std::make_unique<SidTab> (*this);
@@ -99,6 +100,7 @@ MainComponent::~MainComponent()
     sidPane.reset();
     midiPane.reset();
     playerEngine.reset();
+    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 
@@ -112,7 +114,7 @@ void MainComponent::applyTheme()
     look.setColour (juce::TableHeaderComponent::textColourId, th.text);
     look.setColour (juce::TableHeaderComponent::outlineColourId, th.bg);
     look.setColour (juce::TableHeaderComponent::highlightColourId, th.accent.withAlpha (0.3f));
-    look.setColour (juce::ListBox::backgroundColourId, th.panel);
+    look.setColour (juce::ListBox::backgroundColourId, th.bg);
     sendLookAndFeelChange();
     if (sidPane != nullptr) sidPane->applyTheme();
     if (midiPane != nullptr) midiPane->applyTheme();
@@ -122,8 +124,8 @@ void MainComponent::applyTheme()
 void MainComponent::applyLanguage()
 {
     settingsBtn.setButtonText (T ("Einstellungen"));
-    tabSid.setButtonText ("C64-SID");
-    tabMidi.setButtonText (U ("MIDI → SID"));
+    tabSid.setButtonText ("SID>MIDI");
+    tabMidi.setButtonText ("MIDI>SID");
     tabSid.setTooltip (T ("SID-Archiv: Datenbank der SID-Dateien, Ablauf der Tunes, HVSC, Konvertierung nach MIDI"));
     tabMidi.setTooltip (T ("MIDI-Ordner öffnen und einzelne MIDI-Dateien nach SID konvertieren"));
     settingsBtn.setTooltip (T ("Farbthema, Sprache, Skalierung, Lupe, Updates"));
@@ -157,15 +159,35 @@ void MainComponent::selectTab (int index)
     repaint();
 }
 
-void MainComponent::chooseFolder (const juce::String& title, std::function<void (const juce::File&)> done)
+void MainComponent::chooseFolder (const juce::String& title, std::function<void (const juce::File&)> done, const juce::String& showPattern, const juce::String& rememberKey)
 {
-    chooser = std::make_unique<juce::FileChooser> (title, juce::File(), "*", true);
-    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+    // JUCE's own dialog instead of the Windows folder picker: it lists the files of the folder as well,
+    // so one can see what a folder contains before choosing it.
+    juce::File start (rememberKey.isNotEmpty() ? arch->settings.getProperty (rememberKey).toString() : juce::String());
+    if (! start.isDirectory()) start = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+    chooser = std::make_unique<juce::FileChooser> (title, start, showPattern, false);
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories | juce::FileBrowserComponent::canSelectFiles,
+                          [safe = juce::Component::SafePointer<MainComponent> (this), done, rememberKey] (const juce::FileChooser& fc)
+                          {
+                              if (safe == nullptr) return;
+                              auto f = fc.getResult();
+                              if (f == juce::File()) return;
+                              if (f.existsAsFile()) f = f.getParentDirectory();   // a file was clicked: take its folder
+                              if (! f.isDirectory()) return;
+                              if (rememberKey.isNotEmpty()) { safe->arch->settings.setProperty (rememberKey, f.getFullPathName(), nullptr); safe->arch->settingsChanged(); }
+                              if (done) done (f);
+                          });
+}
+
+void MainComponent::chooseSaveFile (const juce::String& title, const juce::File& suggested, const juce::String& pattern, std::function<void (const juce::File&)> done)
+{
+    chooser = std::make_unique<juce::FileChooser> (title, suggested, pattern, false);
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
                           [safe = juce::Component::SafePointer<MainComponent> (this), done] (const juce::FileChooser& fc)
                           {
                               if (safe == nullptr) return;
                               const auto f = fc.getResult();
-                              if (f.isDirectory() && done) done (f);
+                              if (f != juce::File() && done) done (f);
                           });
 }
 
@@ -227,8 +249,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.fillAll (th.bg);
     g.setColour (th.panel);
     g.fillRect (headerArea);
-    paintLogo (g, logoArea.toFloat().removeFromLeft ((float) logoArea.getHeight()));
-    paintTitle (g, logoArea.withTrimmedLeft (logoArea.getHeight() + 8), 25.0f);
+    paintTitle (g, logoArea, 27.0f);
 
     // status bar
     g.setColour (th.panel);
@@ -262,10 +283,10 @@ void MainComponent::resized()
     auto r = getLocalBounds();
     headerArea = r.removeFromTop (52);
     auto h = headerArea.reduced (10, 8);
-    logoArea = h.removeFromLeft (190);
-    h.removeFromLeft (10);
+    logoArea = h.removeFromLeft (135);
+    h.removeFromLeft (14);
     tabSid.setBounds (h.removeFromLeft (130)); h.removeFromLeft (8);
-    tabMidi.setBounds (h.removeFromLeft (150));
+    tabMidi.setBounds (h.removeFromLeft (130));
     aboutBtn.setBounds (h.removeFromRight (34)); h.removeFromRight (6);
     settingsBtn.setBounds (h.removeFromRight (120)); h.removeFromRight (12);
     if (updateBtn.isVisible()) updateBtn.setBounds (h.removeFromRight (juce::jmin (210, h.getWidth() / 3)));

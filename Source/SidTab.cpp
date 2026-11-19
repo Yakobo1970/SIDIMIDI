@@ -37,6 +37,35 @@ void PositionBar::paint (juce::Graphics& g)
     g.drawText (getText ? getText() : juce::String(), getLocalBounds().reduced (6, 0), juce::Justification::centred, false);
 }
 
+void RepeatButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    auto* l = dynamic_cast<ui::Look*> (&getLookAndFeel());
+    const auto& th = l != nullptr ? l->theme() : themes()[0];
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    auto base = getToggleState() ? th.accent : th.panel2;
+    if (over) base = base.brighter (0.12f);
+    if (down) base = base.darker (0.15f);
+    g.setColour (base);
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (getToggleState() ? th.bg : th.text);
+    const auto c = r.getCentre();
+    const float rad = std::min (r.getWidth(), r.getHeight()) * 0.27f, head = rad * 0.62f;
+    const float pi = juce::MathConstants<float>::pi;
+    for (int k = 0; k < 2; ++k)
+    {
+        const float a0 = (k == 0 ? 0.12f : 1.12f) * pi, a1 = (k == 0 ? 0.80f : 1.80f) * pi;
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, rad, rad, 0.0f, a0, a1, true);
+        g.strokePath (arc, juce::PathStrokeType (1.9f));
+        // arrow head at the end of the arc, pointing clockwise
+        const juce::Point<float> p (c.x + rad * std::sin (a1), c.y - rad * std::cos (a1));
+        const juce::Point<float> t (std::cos (a1), std::sin (a1)), n (-t.y, t.x);
+        juce::Path tri;
+        tri.addTriangle (p + t * head * 1.15f, p + n * head * 0.85f, p - n * head * 0.85f);
+        g.fillPath (tri);
+    }
+}
+
 // ================================================================================================ SidTab
 SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archive())
 {
@@ -49,7 +78,8 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     addAndMakeVisible (songLabel);
     addAndMakeVisible (emptyHint);
     for (auto* b : { &folders, &scan, &hvscBtn, &playBtn, &stopBtn, &filterBtn, &ratingBtn, &clearFilters, &zoomReset }) addAndMakeVisible (b);
-    for (auto* b : { &onlyFav, &autoNext }) addAndMakeVisible (b);
+    addAndMakeVisible (onlyFav);
+    addAndMakeVisible (autoNext);
     addAndMakeVisible (search);
     playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
     stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
@@ -170,7 +200,6 @@ void SidTab::applyLanguage()
     clearFilters.setButtonText (T ("Filter löschen"));
     zoomReset.setButtonText (T ("Ganz sehen"));
     onlyFav.setButtonText (juce::String::fromUTF8 ("♥ ") + T ("Nur Favoriten"));
-    autoNext.setButtonText (T ("Weiter zum nächsten"));
     songLabel.setText (T ("Song:"), juce::dontSendNotification);
     search.setTextToShowWhenEmpty (T ("Suche in Titel, Autor, Komponist, Pfad …"), juce::Colours::grey);
     folders.setTooltip (T ("SID-Ordner hinzufügen, entfernen oder schreibschützen (Ordner lassen sich auch ins Fenster ziehen)"));
@@ -182,7 +211,8 @@ void SidTab::applyLanguage()
     filterBtn.setTooltip (T ("Nach Herkunft und Besonderheiten filtern"));
     ratingBtn.setTooltip (T ("Nur Tunes ab einer Mindestbewertung zeigen"));
     onlyFav.setTooltip (T ("Nur Favoriten zeigen"));
-    autoNext.setTooltip (T ("Nach dem Ende eines Tunes den nächsten in der Liste abspielen"));
+    autoNext.setTooltip (T ("Wiederholen: nach dem Ende eines Tunes den nächsten der Liste spielen, am Listenende wieder von vorn"));
+    position.setTooltip (T ("Position im Tune (Klick oder Ziehen springt)"));
     zoomReset.setTooltip (T ("Zoom zurücksetzen (Strg + Mausrad zoomt, Doppelklick in der Darstellung ebenfalls)"));
     clearFilters.setTooltip (T ("Alle Suchfelder und Filter leeren"));
     songBox.setTooltip (T ("Song (Subtune) des Tunes, der dargestellt und abgespielt wird"));
@@ -230,11 +260,6 @@ void SidTab::resized()
     folders.setBounds (h.removeFromLeft (76)); h.removeFromLeft (6);
     scan.setBounds (h.removeFromLeft (92)); h.removeFromLeft (6);
     hvscBtn.setBounds (h.removeFromLeft (70)); h.removeFromLeft (14);
-    // right side: transport and position
-    stopBtn.setBounds (h.removeFromRight (34)); h.removeFromRight (4);
-    playBtn.setBounds (h.removeFromRight (34)); h.removeFromRight (8);
-    const int posW = juce::jlimit (110, 300, h.getWidth() / 4);
-    position.setBounds (h.removeFromRight (posW)); h.removeFromRight (12);
     const bool compact = h.getWidth() < 640;
     onlyFav.setButtonText (compact ? juce::String::fromUTF8 ("♥") : juce::String::fromUTF8 ("♥ ") + T ("Nur Favoriten"));
     onlyFav.setBounds (h.removeFromRight (compact ? 44 : 140)); h.removeFromRight (6);
@@ -253,12 +278,16 @@ void SidTab::resized()
     clearFilters.setBounds (r.getRight() - 140, r.getBottom() - 28, 130, 24);
 
     // bottom: header line (song, zoom), picture, info
-    graphHeader = bottom.removeFromTop (34);
+    graphHeader = bottom.removeFromTop (38);
     auto gh = graphHeader.reduced (10, 4);
     songLabel.setBounds (gh.removeFromLeft (52));
     songBox.setBounds (gh.removeFromLeft (190)); gh.removeFromLeft (10);
-    zoomReset.setBounds (gh.removeFromLeft (100)); gh.removeFromLeft (10);
-    autoNext.setBounds (gh.removeFromLeft (std::min (210, gh.getWidth())));
+    zoomReset.setBounds (gh.removeFromLeft (100)); gh.removeFromLeft (22);
+    // transport: play / pause, stop, repeat and the position with the time
+    playBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
+    stopBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
+    autoNext.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (10);
+    position.setBounds (gh.removeFromLeft (juce::jlimit (120, 420, gh.getWidth())));
     infoWidth = juce::jlimit (260, 520, bottom.getWidth() * 3 / 10);
     auto infoArea = bottom.removeFromRight (infoWidth);
     info.setBounds (infoArea.reduced (6, 2));
@@ -441,13 +470,24 @@ void SidTab::stopPlayback()
     position.repaint();
 }
 
-void SidTab::playNext (int delta)
+void SidTab::playNext (int delta, bool wrap)
 {
+    const int rows = list.numRows();
     const int row = list.rowOf (playingId != 0 ? playingId : (selected() != nullptr ? selected()->id : 0));
-    for (int r = row + delta; r >= 0 && r < list.numRows(); r += delta)
+    auto tryRow = [&] (int r)
     {
         auto* e = list.rowEntry (r);
-        if (e != nullptr && ! e->has (fMissing) && ! e->has (fError)) { list.selectRow (r); play (e, 0); return; }
+        if (e == nullptr || e->has (fMissing) || e->has (fError)) return false;
+        list.selectRow (r);
+        play (e, 0);
+        return true;
+    };
+    for (int r = row + delta; r >= 0 && r < rows; r += delta)
+        if (tryRow (r)) return;
+    if (wrap && rows > 0)   // repeat: continue at the other end of the list (up to the starting row)
+    {
+        for (int r = delta > 0 ? 0 : rows - 1; r >= 0 && r < rows && (delta > 0 ? r <= row : r >= row); r += delta)
+            if (tryRow (r)) return;
     }
     stopPlayback();
 }
@@ -482,7 +522,7 @@ void SidTab::timerCallback()
         position.repaint();
         if (pl.takeSidFinished())
         {
-            if (autoNext.getToggleState()) playNext (1);
+            if (autoNext.getToggleState()) playNext (1, true);
             else stopPlayback();
         }
     }
@@ -508,7 +548,7 @@ void SidTab::refreshAll()
 // ---- folders
 void SidTab::addFolderDialog()
 {
-    main.chooseFolder (T ("SID-Ordner zum Archiv hinzufügen"), [this] (const juce::File& f) { addFolders ({ f.getFullPathName() }); });
+    main.chooseFolder (T ("SID-Ordner zum Archiv hinzufügen"), [this] (const juce::File& f) { addFolders ({ f.getFullPathName() }); }, "*.sid", "lastSidFolder");
 }
 
 void SidTab::addFolders (const juce::StringArray& paths)
@@ -630,25 +670,36 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
     m.addItem (1, T ("Abspielen"), playable);
     m.addSeparator();
 
+    // Two ways, both run at once: straight into the SID's own folder, or "save as" with a file name.
     juce::PopupMenu conv;
-    if (! many)
+    auto songItems = [&] (juce::PopupMenu& sub, int idBase, bool withAll)
     {
         const int n = std::min (clicked.songs, 40);
         for (int i = 1; i <= n; ++i)
         {
             const double len = clicked.lengthOf (i);
-            conv.addItem (300 + i, T ("Song %1 von %2", i, clicked.songs) + (len > 0 ? "  (" + formatTime (len) + ")" : juce::String()) + (i == clicked.startSong ? juce::String::fromUTF8 ("  ★") : juce::String()), playable);
+            sub.addItem (idBase + i, T ("Song %1 von %2", i, clicked.songs) + (len > 0 ? "  (" + formatTime (len) + ")" : juce::String()) + (i == clicked.startSong ? juce::String::fromUTF8 ("  ★") : juce::String()), playable);
         }
-        if (clicked.songs > 1) { conv.addSeparator(); conv.addItem (299, T ("Alle %1 Songs als eigene MIDI-Dateien", clicked.songs), playable); }
+        if (withAll) { sub.addSeparator(); sub.addItem (idBase - 1, T ("Alle %1 Songs als eigene MIDI-Dateien", clicked.songs), playable); }
+    };
+    if (many)
+    {
+        conv.addItem (298, T ("Start-Song von %1 Dateien direkt in den SID-Ordner", (int) targets.size()), playable);
+        conv.addItem (297, T ("Start-Song von %1 Dateien in einen Ordner speichern …", (int) targets.size()), playable);
+    }
+    else if (clicked.songs <= 1)
+    {
+        conv.addItem (300 + clicked.startSong, T ("Direkt in den SID-Ordner"), playable);
+        conv.addItem (350 + clicked.startSong, T ("Speichern unter … (Dateiname wählen)"), playable);
     }
     else
-        conv.addItem (298, T ("Start-Song von %1 Dateien", (int) targets.size()), playable);
-    conv.addSeparator();
-    const int mode = (int) arch.settings.getProperty ("midiOutMode", 0);
-    conv.addItem (290, T ("MIDI neben die SID-Datei schreiben"), true, mode == 0);
-    conv.addItem (291, mode == 1 ? T ("In festen Ordner schreiben: %1", arch.settings.getProperty ("midiOutDir").toString()) : T ("In festen Ordner schreiben …"), true, mode == 1);
-    conv.addSeparator();
-    conv.addItem (292, T ("Hinweis: je 4 Auflösungsstufen (Spur 1–3 vereinfacht bis Spur 10–12 mit Pitch-Bend/CC)"), false);
+    {
+        juce::PopupMenu direct, save;
+        songItems (direct, 300, true);
+        songItems (save, 350, true);
+        conv.addSubMenu (T ("Direkt in den SID-Ordner"), direct, playable);
+        conv.addSubMenu (T ("Speichern unter … (Dateiname wählen)"), save, playable);
+    }
     m.addSubMenu (T ("Nach MIDI konvertieren"), conv, playable);
     m.addSeparator();
 
@@ -694,18 +745,10 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
         switch (r)
         {
             case 1: t.play (e, 0); break;
-            case 290: t.arch.settings.setProperty ("midiOutMode", 0, nullptr); t.arch.settingsChanged(); break;
-            case 291:
-                t.main.chooseFolder (T ("Zielordner für MIDI-Dateien"), [safe] (const juce::File& f)
-                {
-                    if (safe == nullptr) return;
-                    safe->arch.settings.setProperty ("midiOutMode", 1, nullptr);
-                    safe->arch.settings.setProperty ("midiOutDir", f.getFullPathName(), nullptr);
-                    safe->arch.settingsChanged();
-                });
-                break;
+            case 297: t.saveMidiInto (live); break;
             case 298: t.convertToMidi (live, 0); break;
             case 299: t.convertToMidi ({ e }, -1); break;
+            case 349: t.saveMidiInto ({ e }); break;
             case 410: t.arch.setFavourite (*e, ! e->favourite); break;
             case 500: juce::File (e->path).revealToUser(); break;
             case 501: juce::SystemClipboard::copyTextToClipboard (e->path); break;
@@ -724,7 +767,8 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
             case 601: juce::URL ("https://www.youtube.com/results?search_query=" + juce::URL::addEscapeChars (q + " C64 SID", true)).launchInDefaultBrowser(); break;
             case 602: juce::URL ("https://www.google.com/search?q=" + juce::URL::addEscapeChars (q + " C64 SID", true)).launchInDefaultBrowser(); break;
             default:
-                if (r >= 300 && r < 299 + 42 && r != 299) t.convertToMidi ({ e }, r - 300);
+                if (r >= 300 && r < 342) t.convertToMidi ({ e }, r - 300);
+                else if (r >= 351 && r < 392) t.saveMidiAs (*e, r - 350);
                 else if (r >= 400 && r <= 405) { for (auto* x : live) t.arch.setRating (*x, r - 400); }
                 break;
         }
@@ -732,14 +776,15 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
 }
 
 // ---- conversion SID -> MIDI
-juce::File SidTab::midiTargetFor (const Entry& e, int song, bool allSongs) const
+juce::File SidTab::lastMidiDir (const Entry& e) const
 {
-    juce::File dir (e.folder);
-    if ((int) arch.settings.getProperty ("midiOutMode", 0) == 1)
-    {
-        const juce::File d (arch.settings.getProperty ("midiOutDir").toString());
-        if (d.isDirectory()) dir = d;
-    }
+    const juce::File d (arch.settings.getProperty ("midiSaveDir").toString());
+    return d.isDirectory() ? d : juce::File (e.folder);
+}
+
+juce::File SidTab::midiTargetFor (const Entry& e, int song, bool allSongs, const juce::File& folder) const
+{
+    const juce::File dir = folder != juce::File() ? folder : juce::File (e.folder);
     juce::String base = juce::File (e.name).getFileNameWithoutExtension();
     if (e.songs > 1 || allSongs) base << "_song" << juce::String (song).paddedLeft ('0', 2);
     juce::File target = dir.getChildFile (base + ".mid");
@@ -748,10 +793,9 @@ juce::File SidTab::midiTargetFor (const Entry& e, int song, bool allSongs) const
     return target;
 }
 
-void SidTab::convertToMidi (const std::vector<Entry*>& entries, int songOrZero)
+void SidTab::convertToMidi (const std::vector<Entry*>& entries, int songOrZero, const juce::File& folder)
 {
-    struct Job { juce::String path; int song; juce::File target; juce::String name; };
-    std::vector<Job> jobs;
+    std::vector<std::tuple<juce::String, int, juce::File, juce::String>> jobs;   // path, song, target, name
     for (auto* e : entries)
     {
         if (e->has (fMissing) || e->has (fError)) continue;
@@ -760,17 +804,64 @@ void SidTab::convertToMidi (const std::vector<Entry*>& entries, int songOrZero)
         else songs.push_back (songOrZero > 0 ? songOrZero : e->startSong);
         for (int s : songs)
         {
-            auto target = midiTargetFor (*e, s, songOrZero == -1);
+            auto target = midiTargetFor (*e, s, songOrZero == -1, folder);
             if (arch.isProtected (target.getParentDirectory().getFullPathName()))
             {
                 main.setStatus (T ("Der Zielordner ist schreibgeschützt: %1", target.getParentDirectory().getFullPathName()));
                 return;
             }
             // two songs of the same job must not pick the same name
-            for (auto& j : jobs) if (j.target == target) target = target.getSiblingFile (target.getFileNameWithoutExtension() + "_" + juce::String (s) + ".mid");
-            jobs.push_back ({ e->path, s, target, e->name });
+            for (auto& j : jobs) if (std::get<2> (j) == target) target = target.getSiblingFile (target.getFileNameWithoutExtension() + "_" + juce::String (s) + ".mid");
+            jobs.emplace_back (e->path, s, target, e->name);
         }
     }
+    runMidiJobs (std::move (jobs));
+}
+
+void SidTab::saveMidiAs (Entry& e, int song)
+{
+    juce::String base = juce::File (e.name).getFileNameWithoutExtension();
+    if (e.songs > 1) base << "_song" << juce::String (song).paddedLeft ('0', 2);
+    const auto suggested = lastMidiDir (e).getChildFile (base + ".mid");
+    const int id = e.id;
+    juce::Component::SafePointer<SidTab> safe (this);
+    main.chooseSaveFile (T ("MIDI-Datei speichern unter"), suggested, "*.mid", [safe, id, song] (const juce::File& chosen)
+    {
+        if (safe == nullptr) return;
+        auto& t = *safe;
+        auto* en = t.arch.byId (id);
+        if (en == nullptr) return;
+        auto target = chosen.hasFileExtension ("mid;midi") ? chosen : chosen.withFileExtension ("mid");
+        const auto dir = target.getParentDirectory();
+        if (t.arch.isProtected (dir.getFullPathName()))
+        {
+            t.main.setStatus (T ("Der Zielordner ist schreibgeschützt: %1", dir.getFullPathName()));
+            return;
+        }
+        t.arch.settings.setProperty ("midiSaveDir", dir.getFullPathName(), nullptr);   // offered first next time, also after a restart
+        t.arch.settingsChanged();
+        t.runMidiJobs ({ { en->path, song, target, en->name } });
+    });
+}
+
+void SidTab::saveMidiInto (const std::vector<Entry*>& entries)
+{
+    std::vector<int> ids;
+    for (auto* e : entries) ids.push_back (e->id);
+    const bool all = entries.size() == 1 && entries[0]->songs > 1;   // the "all songs" entry of the menu
+    juce::Component::SafePointer<SidTab> safe (this);
+    main.chooseFolder (T ("Zielordner für die MIDI-Dateien"), [safe, ids, all] (const juce::File& dir)
+    {
+        if (safe == nullptr) return;
+        auto& t = *safe;
+        std::vector<Entry*> live;
+        for (int id : ids) if (auto* e = t.arch.byId (id)) live.push_back (e);
+        t.convertToMidi (live, all ? -1 : 0, dir);
+    }, "*.mid", "midiSaveDir");
+}
+
+void SidTab::runMidiJobs (std::vector<std::tuple<juce::String, int, juce::File, juce::String>> jobs)
+{
     if (jobs.empty()) return;
     main.setStatus (T ("Konvertiere %1 Datei(en) nach MIDI …", (int) jobs.size()));
     juce::Component::SafePointer<SidTab> safe (this);
@@ -779,12 +870,12 @@ void SidTab::convertToMidi (const std::vector<Entry*>& entries, int songOrZero)
         int ok = 0;
         juce::String firstError;
         juce::File last;
-        for (auto& j : jobs)
+        for (auto& [path, song, target, name] : jobs)
         {
             juce::String log;
-            j.target.getParentDirectory().createDirectory();
-            if (SidToMidiCoreEngine::convertSidToMidiFile (juce::File (j.path), j.target, log, j.song)) { ++ok; last = j.target; }
-            else if (firstError.isEmpty()) firstError = j.name + ": " + log.trim().fromLastOccurrenceOf ("\n", false, false);
+            target.getParentDirectory().createDirectory();
+            if (SidToMidiCoreEngine::convertSidToMidiFile (juce::File (path), target, log, song)) { ++ok; last = target; }
+            else if (firstError.isEmpty()) firstError = name + ": " + log.trim().fromLastOccurrenceOf ("\n", false, false);
         }
         juce::MessageManager::callAsync ([safe, ok, total = (int) jobs.size(), firstError, last]
         {
@@ -847,7 +938,7 @@ void SidTab::copyOrMove (const std::vector<Entry*>& entries, bool move)
             }
         }
         t.main.setStatus (move ? T ("%1 Datei(en) verschoben", n) : T ("%1 Datei(en) kopiert", n));
-    });
+    }, "*.sid", "lastSidFolder");
 }
 
 void SidTab::trashEntries (const std::vector<Entry*>& entries)

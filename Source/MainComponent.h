@@ -48,11 +48,13 @@ public:
     void showLoupeMenu();
     void updateLoupe();
     void showLoupeAt (juce::Point<int> p);
-    void selectTab (int index);                             // 0 = C64-SID, 1 = MIDI
+    void selectTab (int index);                             // 0 = SID>MIDI, 1 = MIDI>SID
     int currentTab() const { return tab; }
     SidTab& sidTab() { return *sidPane; }
     MidiTab& midiTab() { return *midiPane; }
-    void chooseFolder (const juce::String& title, std::function<void (const juce::File&)> done);
+    // folder dialog that also shows the files (pattern = which files are listed); the last folder is kept under rememberKey
+    void chooseFolder (const juce::String& title, std::function<void (const juce::File&)> done, const juce::String& showPattern = "*", const juce::String& rememberKey = {});
+    void chooseSaveFile (const juce::String& title, const juce::File& suggested, const juce::String& pattern, std::function<void (const juce::File&)> done);
     void notifySettings() { arch->settingsChanged(); }
     void paintLogo (juce::Graphics&, juce::Rectangle<float>) const;
     void paintTitle (juce::Graphics&, juce::Rectangle<int>, float height) const;
@@ -81,7 +83,7 @@ private:
     juce::ThreadPool pool { 2 };
     std::unique_ptr<SidTab> sidPane;
     std::unique_ptr<MidiTab> midiPane;
-    TabButton tabSid { "C64-SID", 0 }, tabMidi { "MIDI → SID", 1 };
+    TabButton tabSid { "SID>MIDI", 0 }, tabMidi { "MIDI>SID", 1 };
     juce::TextButton settingsBtn, aboutBtn { "?" }, updateBtn;
     juce::Image iconImage, bannerImage;
     juce::Rectangle<int> headerArea, statusArea, logoArea, contentArea;

@@ -1,4 +1,4 @@
-// SIDiMIDI – tab "C64-SID": the SID archive (database of all SID files), the course of the selected tune, HVSC information.
+// SIDiMIDI – tab "SID>MIDI": the SID archive (database of all SID files), the course of the selected tune, HVSC information.
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "SidTable.h"
@@ -36,6 +36,14 @@ private:
     void seek (const juce::MouseEvent& e) { if (onSeekFraction) onSeekFraction (juce::jlimit (0.0, 1.0, (double) e.x / (double) std::max (1, getWidth()))); }
 };
 
+// the repeat symbol (two arrows chasing each other in a circle) as a toggle button
+class RepeatButton : public juce::Button
+{
+public:
+    RepeatButton() : juce::Button ("repeat") { setClickingTogglesState (true); }
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+};
+
 class SidTab : public juce::Component, private juce::Timer
 {
 public:
@@ -57,7 +65,7 @@ public:
     void togglePlay();                  // space
     void stopPlayback();
     bool isPlaying() const;
-    void playNext (int delta);
+    void playNext (int delta, bool wrap = false);
 
     // folders and scanning
     void addFolders (const juce::StringArray& paths);
@@ -83,7 +91,8 @@ private:
     DragBar dragBar;
     PositionBar position;
     juce::TextButton folders, scan, hvscBtn, playBtn, stopBtn, filterBtn, ratingBtn, clearFilters, zoomReset;
-    juce::ToggleButton onlyFav, autoNext;
+    juce::ToggleButton onlyFav;
+    RepeatButton autoNext;
     juce::TextEditor search, info;
     juce::ComboBox songBox;
     juce::Label emptyHint, songLabel;
@@ -112,8 +121,13 @@ private:
     void showRatingMenu();
     void updateButtons();
     void updateEmptyHint();
-    void convertToMidi (const std::vector<Entry*>& entries, int songOrZero);   // 0 = start song, -1 = all songs
-    juce::File midiTargetFor (const Entry& e, int song, bool allSongs) const;
+    // 0 = start song, -1 = all songs; folder = where the files go (default: next to the SID file)
+    void convertToMidi (const std::vector<Entry*>& entries, int songOrZero, const juce::File& folder = {});
+    void saveMidiAs (Entry& e, int song);             // file dialog with a name, then converts at once
+    void saveMidiInto (const std::vector<Entry*>& entries);   // folder dialog, then converts at once
+    juce::File midiTargetFor (const Entry& e, int song, bool allSongs, const juce::File& folder) const;
+    juce::File lastMidiDir (const Entry& e) const;
+    void runMidiJobs (std::vector<std::tuple<juce::String, int, juce::File, juce::String>> jobs);
     void renameEntry (Entry& e);
     void copyOrMove (const std::vector<Entry*>& entries, bool move);
     void trashEntries (const std::vector<Entry*>& entries);

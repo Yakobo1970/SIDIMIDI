@@ -2,6 +2,7 @@
 //   SidTest info <file.sid>
 //   SidTest hvsc <C64Music folder>          documents: version, lengths, STIL, bugs, musicians
 //   SidTest scanstat <folder> [max]         header statistics over a folder tree
+#include "../Source/AudioPlayerEngine.h"
 #include <juce_core/juce_core.h>
 #include "../Source/SidInfo.h"
 #include "../Source/Hvsc.h"
@@ -150,6 +151,49 @@ int main (int argc, char** argv)
                  + ", tri/saw/pulse/noise frames " + juce::String (waves[1]) + "/" + juce::String (waves[2]) + "/" + juce::String (waves[4]) + "/" + juce::String (waves[8]));
         }
         out ("note range " + juce::String (t->minNote) + " .. " + juce::String (t->maxNote));
+        return 0;
+    }
+
+    if (cmd == "tracedump" && argc > 2)
+    {
+        // SidTest tracedump <file> [song] [maxEvents]: lists the first register writes of the trace
+        const auto si = parseSidFile (juce::File (juce::String::fromUTF8 (argv[2])));
+        const int song = argc > 3 ? juce::String (argv[3]).getIntValue() : si.startSong;
+        const int maxEv = argc > 4 ? juce::String (argv[4]).getIntValue() : 80;
+        auto t = computeTrace (si, song, 20.0);
+        out ("frames " + juce::String ((int) t->frames) + " events " + juce::String (t->events ? (int) t->events->size() : 0) + " fps " + juce::String (t->fps, 3));
+        int n = 0;
+        if (t->events)
+            for (auto& e : *t->events)
+            {
+                if (n++ >= maxEv) break;
+                out ("f" + juce::String ((int) e.frameIndex) + " reg " + juce::String::toHexString ((int) e.reg) + " = " + juce::String::toHexString ((int) e.value));
+            }
+        return 0;
+    }
+
+    if (cmd == "render" && argc > 2)
+    {
+        // SidTest render <file> [song] [seconds]: runs the player engine offline and prints the loudness per second
+        const auto si = parseSidFile (juce::File (juce::String::fromUTF8 (argv[2])));
+        const int song = argc > 3 ? juce::String (argv[3]).getIntValue() : si.startSong;
+        const int secs = argc > 4 ? juce::String (argv[4]).getIntValue() : 12;
+        auto t = computeTrace (si, song, (double) secs + 1.0);
+        AudioPlayerEngine pl (false);
+        pl.prepareToPlay (512, 44100.0);
+        pl.playTrace (*t->events, t->fps, t->frames, 0, si.ntsc());
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int s = 0; s < secs; ++s)
+        {
+            double sum = 0; int n = 0;
+            for (int b = 0; b < 44100 / 512; ++b)
+            {
+                buf.clear();
+                pl.getNextAudioBlock ({ &buf, 0, 512 });
+                for (int i = 0; i < 512; ++i) { sum += buf.getSample (0, i) * buf.getSample (0, i); ++n; }
+            }
+            out ("second " + juce::String (s) + ": rms " + juce::String (std::sqrt (sum / std::max (1, n)), 4));
+        }
         return 0;
     }
 

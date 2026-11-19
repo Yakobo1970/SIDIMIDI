@@ -22,7 +22,7 @@ const MidiColDef kMidiCols[] = {
     { mTracks,  "Spuren",        54,  true,  "Spuren mit Noten" },
     { mNotes,   "Noten",         58,  true,  "Anzahl der Noten" },
     { mLength,  "Länge",         56,  true,  "Spieldauer" },
-    { mResult,  "Ergebnis",      160, false, "Die zuletzt geschriebene .sid-Datei – ▶ spielt sie ab" },
+    { mResult,  "Ergebnis",      240, false, "Die zuletzt geschriebene .sid-Datei – ▶ spielt sie ab" },
     { mFolder,  "Ordner",        180, false, "Unterordner" } };
 
 bool hasSidmSignature (juce::MidiFile& mf)
@@ -208,7 +208,7 @@ public:
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool) override
     {
         const auto& th = theme();
-        g.setColour (row & 1 ? th.panel : th.panel.interpolatedWith (th.panel2, 0.35f));
+        g.setColour (ui::rowColour (th, row));
         g.fillRect (0, 0, w, h);
         if (row < 0 || row >= (int) tracks.size()) return;
         const int v = voiceOf[(size_t) row];
@@ -306,7 +306,7 @@ MidiTab::MidiTab (MainComponent& m) : main (m), table ("midis", this)
         table.getHeader().addColumn (T (c.name), c.id, c.width, 24, 700, c.id == mConvert || c.id == mPlay || c.id == mResult ? (flags & ~juce::TableHeaderComponent::sortable) : flags);
     table.getHeader().setSortColumnId (sortCol, sortForward);
     table.getHeader().setStretchToFitActive (false);
-    for (auto* b : { &openBtn, &recentBtn, &rescanBtn, &outputBtn, &stopBtn, &fundusBtn }) addAndMakeVisible (b);
+    for (auto* b : { &openBtn, &recentBtn, &rescanBtn, &stopBtn, &fundusBtn }) addAndMakeVisible (b);
     addAndMakeVisible (subfolders);
     addAndMakeVisible (search);
     addAndMakeVisible (description);
@@ -326,11 +326,10 @@ MidiTab::MidiTab (MainComponent& m) : main (m), table ("midis", this)
 
     openBtn.onClick = [this]
     {
-        main.chooseFolder (T ("Ordner mit MIDI-Dateien öffnen"), [this] (const juce::File& f) { openFolder (f); });
+        main.chooseFolder (T ("Ordner mit MIDI-Dateien öffnen"), [this] (const juce::File& f) { openFolder (f); }, "*.mid;*.midi;*.kar;*.rmi", "lastMidiFolder");
     };
     recentBtn.onClick = [this] { showRecentMenu(); };
     rescanBtn.onClick = [this] { startScan(); };
-    outputBtn.onClick = [this] { showOutputMenu(); };
     stopBtn.onClick = [this] { stopPreview(); };
     fundusBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3b6fd6));
     fundusBtn.onClick = [] { juce::URL (AboutPanel::kMidiFundusUrl).launchInDefaultBrowser(); };
@@ -357,14 +356,12 @@ void MidiTab::applyLanguage()
     openBtn.setButtonText (T ("Ordner öffnen …"));
     recentBtn.setButtonText (juce::String::fromUTF8 ("▾"));
     rescanBtn.setButtonText (T ("Neu lesen"));
-    outputBtn.setButtonText (T ("Ausgabe"));
     stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
     subfolders.setButtonText (T ("Unterordner"));
     fundusBtn.setButtonText (T ("Midi-Fundus auf undabtanzbar.de"));
     openBtn.setTooltip (T ("Ordner mit MIDI-Dateien öffnen (auch per Ziehen ins Fenster)"));
     recentBtn.setTooltip (T ("Zuletzt geöffnete Ordner"));
     rescanBtn.setTooltip (T ("Den Ordner neu einlesen"));
-    outputBtn.setTooltip (T ("Wohin die SID-Dateien geschrieben werden"));
     stopBtn.setTooltip (T ("Vorhören stoppen"));
     subfolders.setTooltip (T ("Auch die Unterordner nach MIDI-Dateien durchsuchen"));
     fundusBtn.setTooltip (AboutPanel::kMidiFundusUrl);
@@ -402,17 +399,16 @@ void MidiTab::resized()
     rescanBtn.setBounds (h.removeFromLeft (92)); h.removeFromLeft (10);
     subfolders.setBounds (h.removeFromLeft (120)); h.removeFromLeft (10);
     stopBtn.setBounds (h.removeFromRight (34)); h.removeFromRight (6);
-    outputBtn.setBounds (h.removeFromRight (100)); h.removeFromRight (10);
     search.setBounds (h.removeFromRight (std::min (320, h.getWidth() / 2))); h.removeFromRight (10);
     pathLabel.setBounds (h);
 
-    const int leftW = juce::jlimit (420, std::max (440, r.getWidth() * 62 / 100), r.getWidth() - 320);
-    auto left = r.removeFromLeft (leftW);
-    table.setBounds (left);
-    auto right = r.reduced (8, 8);
-    infoBox = right.removeFromBottom (juce::jlimit (130, 190, right.getHeight() / 4));
-    right.removeFromBottom (8);
-    description.setBounds (right);
+    // the table uses the whole width (the result column needs the room); the explanation sits below it
+    const int bottomH = juce::jlimit (170, 300, r.getHeight() * 32 / 100);
+    auto bottom = r.removeFromBottom (bottomH).reduced (8, 8);
+    table.setBounds (r);
+    infoBox = bottom.removeFromRight (juce::jlimit (300, 420, bottom.getWidth() / 3));
+    bottom.removeFromRight (8);
+    description.setBounds (bottom);
     auto inner = infoBox.reduced (12, 10);
     fundusBtn.setBounds (inner.removeFromBottom (30));
     inner.removeFromBottom (6);
@@ -572,38 +568,11 @@ void MidiTab::showRecentMenu()
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recentBtn), [this, recent] (int r) { if (r > 0) openFolder (juce::File (recent[r - 1])); });
 }
 
-void MidiTab::showOutputMenu()
-{
-    auto& st = main.archive().settings;
-    const int mode = (int) st.getProperty ("sidOutMode", 0);
-    juce::PopupMenu m;
-    m.addItem (1, T ("SID-Datei neben die MIDI-Datei schreiben"), true, mode == 0);
-    m.addItem (2, mode == 1 ? T ("In festen Ordner schreiben: %1", st.getProperty ("sidOutDir").toString()) : T ("In festen Ordner schreiben …"), true, mode == 1);
-    m.addSeparator();
-    m.addItem (3, T ("Ergebnis ins SID-Archiv aufnehmen, wenn der Ordner dazugehört"), true, (bool) st.getProperty ("sidAddToArchive", true));
-    m.addSeparator();
-    m.addItem (-1, T ("Vorhandene Dateien werden nie überschrieben (der Name wird durchnummeriert)"), false);
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&outputBtn), [this] (int r)
-    {
-        auto& s = main.archive().settings;
-        if (r == 1) s.setProperty ("sidOutMode", 0, nullptr);
-        else if (r == 2)
-            main.chooseFolder (T ("Zielordner für SID-Dateien"), [this] (const juce::File& f)
-            {
-                main.archive().settings.setProperty ("sidOutMode", 1, nullptr);
-                main.archive().settings.setProperty ("sidOutDir", f.getFullPathName(), nullptr);
-                main.notifySettings();
-            });
-        else if (r == 3) s.setProperty ("sidAddToArchive", ! (bool) s.getProperty ("sidAddToArchive", true), nullptr);
-        main.notifySettings();
-    });
-}
-
 // ---- table
 void MidiTab::paintRowBackground (juce::Graphics& g, int row, int w, int h, bool selected)
 {
     const auto& th = main.theme();
-    auto c = (row & 1) ? th.panel : th.panel.interpolatedWith (th.panel2, 0.35f);
+    auto c = ui::rowColour (th, row);
     if (selected) c = th.accent.withAlpha (0.38f);
     g.setColour (c);
     g.fillRect (0, 0, w, h);
@@ -697,21 +666,6 @@ void MidiTab::playSidResult (int idx)
 }
 
 // ---- conversion
-juce::File MidiTab::sidTargetFor (const MidiItem& m) const
-{
-    auto& st = main.archive().settings;
-    juce::File dir = m.file.getParentDirectory();
-    if ((int) st.getProperty ("sidOutMode", 0) == 1)
-    {
-        const juce::File d (st.getProperty ("sidOutDir").toString());
-        if (d.isDirectory()) dir = d;
-    }
-    const auto base = juce::File::createLegalFileName (m.file.getFileNameWithoutExtension());
-    auto target = dir.getChildFile (base + ".sid");
-    for (int i = 2; target.exists() && i < 1000; ++i) target = dir.getChildFile (base + " (" + juce::String (i) + ").sid");
-    return target;
-}
-
 void MidiTab::convert (int idx, Depth depth)
 {
     const auto* m = item (idx);
@@ -749,9 +703,23 @@ void MidiTab::convert (int idx, Depth depth)
 
 void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip)
 {
+    // pressing a conversion depth opens the save dialog (suggestion: the opened MIDI folder); the conversion then runs at once
     const auto* m = item (idx);
     if (m == nullptr) return;
-    const auto target = sidTargetFor (*m);
+    const auto suggested = (folder.isDirectory() ? folder : m->file.getParentDirectory())
+                               .getChildFile (juce::File::createLegalFileName (m->file.getFileNameWithoutExtension()) + ".sid");
+    juce::Component::SafePointer<MidiTab> safe (this);
+    main.chooseSaveFile (T ("SID-Datei speichern unter"), suggested, "*.sid", [safe, idx, tracks, roles, roundTrip] (const juce::File& chosen)
+    {
+        if (safe == nullptr) return;
+        safe->runConversion (idx, tracks, roles, roundTrip, chosen.hasFileExtension ("sid") ? chosen : chosen.withFileExtension ("sid"));
+    });
+}
+
+void MidiTab::runConversion (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip, const juce::File& target)
+{
+    const auto* m = item (idx);
+    if (m == nullptr) return;
     if (main.archive().isProtected (target.getParentDirectory().getFullPathName()))
     {
         main.setStatus (T ("Der Zielordner ist schreibgeschützt: %1", target.getParentDirectory().getFullPathName()));
@@ -776,7 +744,7 @@ void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const st
                 safe->lastMessage = T ("SID geschrieben: %1", target.getFileName());
                 safe->main.setStatus (T ("SID geschrieben: %1", target.getFullPathName()));
                 auto& a = safe->main.archive();
-                if ((bool) a.settings.getProperty ("sidAddToArchive", true) && a.isInsideFolders (target)) a.addFile (target);
+                if (a.isInsideFolders (target)) a.addFile (target);
                 safe->table.updateContent();
                 safe->table.repaint();
             }

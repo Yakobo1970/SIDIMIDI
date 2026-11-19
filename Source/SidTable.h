@@ -2,6 +2,11 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <map>
+#include <array>
+#include <atomic>
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
 #include "Archive.h"
 #include "Look.h"
 #include "Lang.h"
@@ -11,7 +16,7 @@ namespace sm
 enum Col
 {
     cFav = 1, cRating, cTitle, cAuthor, cReleased, cSongs, cLength, cType, cSid, cClock, cChips,
-    cComposer, cCountry, cArea, cLoad, cSize, cFile, cPath, cStil, cNote, cLastCol
+    cComposer, cCountry, cArea, cLoad, cSize, cFile, cPath, cStil, cNote, cLandscape, cLastCol
 };
 
 struct ColDef
@@ -27,6 +32,13 @@ const ColDef& colDef (int id);
 
 juce::String niceCountry (const juce::String& upper);
 juce::String cellText (const Entry& e, int col);
+
+// miniature of a tune for the "Verlauf" column: the three voices stacked as little mountain ranges
+struct Landscape
+{
+    static constexpr int kBuckets = 160;
+    std::array<std::vector<juce::uint8>, 3> height;   // per voice and time bucket: 0 = silent, 1 … 255 = relative pitch
+};
 
 class SidTable : public juce::Component, private juce::TableListBoxModel, private juce::Timer
 {
@@ -82,6 +94,14 @@ private:
     bool inRefresh = false, masksChanged = false;
     void* watcher = nullptr;   // HeaderWatcher (SidTable.cpp)
 
+    // "Verlauf" column: computed in the background for the rows on screen only
+    struct LandscapeState { std::atomic<int> from { 0 }, to { 0 }; std::atomic<bool> alive { true }; };
+    std::shared_ptr<LandscapeState> lsState = std::make_shared<LandscapeState>();
+    std::unordered_map<int, std::shared_ptr<Landscape>> landscapes;   // by entry id
+    std::unordered_set<int> landscapeAsked;
+    void requestLandscape (const Entry& e, int row);
+    void drawLandscape (juce::Graphics& g, const Landscape* l, int w, int h);
+
     const Theme& theme() const;
     void layoutFooter();
     bool passes (const Entry& e) const;
@@ -98,6 +118,8 @@ private:
     juce::String getCellTooltip (int row, int col) override;
     void backgroundClicked (const juce::MouseEvent&) override;
     void timerCallback() override;
+
+    juce::ThreadPool landscapePool { 1 };   // last member: stops first
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SidTable)
 };

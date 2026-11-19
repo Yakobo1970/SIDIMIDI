@@ -9,17 +9,19 @@ const char* const kAboutDe =
     "WAS MACHT DIESES PROGRAMM?\n"
     "SIDiMIDI verbindet den Commodore 64 mit der modernen Musikproduktion: Es verwaltet SID-Sammlungen wie die High Voltage SID Collection (HVSC), zeigt den Ablauf jedes Tunes als Bild – und wandelt in beide Richtungen zwischen SID- und MIDI-Dateien.\n"
     "\n"
-    "REITER „C64-SID“\n"
+    "REITER „SID>MIDI“\n"
     "• Ordner hinzufügen: über „Ordner“ oder per Ziehen ins Fenster – auch die komplette HVSC. „Einlesen“ baut die Datenbank auf: Titel, Autor, Jahr und Firma, Anzahl der Songs, Länge, SID-Typ (6581/8580), PAL/NTSC, Adressen. Gehört der Ordner zur HVSC, kommen Songlängen, STIL-Texte, Bug-Hinweise sowie Komponist und Land dazu. Beim nächsten Einlesen werden nur neue oder geänderte Dateien gelesen.\n"
     "• Bewertung (Sterne) und Favoriten (Herz) liegen nur in der Datenbank, nie in den Dateien. Sie bleiben auch erhalten, wenn ein HVSC-Update Dateien umbenennt oder verschiebt – SIDiMIDI erkennt sie am Inhalt.\n"
     "• Schreibschutz: „Ordner → Schreibgeschützt“. In so einem Ordner ändert, verschiebt, löscht oder überschreibt SIDiMIDI nie etwas, und es schreibt dort auch keine Konvertierung hinein.\n"
     "• Suchen und filtern: oben das Suchfeld (mehrere Wörter = und, !Wort = ohne), unter jeder Spalte eine eigene Filtermaske (Zahlen: 5, >3, 2-4; Länge: >3:00), dazu Filter nach Herkunft und Mindestbewertung.\n"
     "• Die Darstellung unten zeigt den Ablauf des markierten Tunes: die drei SID-Stimmen in drei Farben (1 orange, 2 cyan, 3 grün) als Tonhöhe über der Zeit. Die Helligkeit folgt der Lautstärke-Hüllkurve, die Balkenform zeigt die Wellenform (Puls: voll, Sägezahn: heller Rand, Dreieck: schmal, Rauschen: blass). Darunter laufen Filter-Cutoff und Gesamtlautstärke. Ein Klick springt an die Stelle, Strg + Mausrad zoomt, Doppelklick zeigt wieder alles, ein Klick auf den Stimmennamen schaltet die Stimme stumm.\n"
-    "• Rechtsklick auf einen Tune: abspielen, nach MIDI konvertieren (je Song, vier Auflösungsstufen), bewerten, Datei verwalten, im Internet suchen, Lupe.\n"
+    "• Über dem Bild sitzt die Abspielsteuerung: ▶ / ❚❚ (abspielen, pausieren), ■ (Stopp), das Kreisel-Symbol (Wiederholen: nach dem Ende den nächsten Tune der Liste spielen, am Listenende wieder von vorn) und die Positionsleiste mit der Zeit – ein Klick darauf springt.\n"
+    "• RSID-Dateien (sie setzen einen kompletten C64 voraus) lassen sich hier nicht abspielen und erscheinen deshalb gar nicht erst in der Liste.\n"
+    "• Rechtsklick auf einen Tune: abspielen, nach MIDI konvertieren (je Song: direkt in den SID-Ordner oder „Speichern unter …“ mit Dateiname; vier Auflösungsstufen), bewerten, Datei verwalten, im Internet suchen, Lupe.\n"
     "• Knopf „HVSC“: zeigt die installierte Version, prüft online die neueste und spielt das Update ein.\n"
     "\n"
-    "REITER „MIDI → SID“\n"
-    "Einen Ordner mit MIDI-Dateien öffnen; hinter jedem Namen stehen die Konvertierungstiefen als Knöpfe. Der große Textbereich erklärt genau, was sie können – und wo die Grenzen liegen.\n"
+    "REITER „MIDI>SID“\n"
+    "Einen Ordner mit MIDI-Dateien öffnen; hinter jedem Namen stehen die Konvertierungstiefen als Knöpfe. Ein Klick darauf öffnet den Speichern-Dialog und wandelt sofort um. Der große Textbereich unter der Liste erklärt genau, was die Tiefen können – und wo die Grenzen liegen.\n"
     "\n"
     "BEDIENUNG\n"
     "• Die Oberfläche ist stufenlos skalierbar: Fenster ziehen (Automatik), Strg + Mausrad, Strg + / − / 0 – oder fest unter „Einstellungen“.\n"
@@ -27,7 +29,7 @@ const char* const kAboutDe =
     "• Update-Prüfung: einmal am Tag eine Anfrage an GitHub; abschaltbar unter „Einstellungen“.\n"
     "\n"
     "GRENZEN\n"
-    "Beide Konvertierungen sind Näherungen. SID → MIDI emuliert den 6502-Prozessor und die SID-Register; Tunes, die echte C64-Hardware voraussetzen (BASIC-Programme, manche RSID-Dateien), bleiben stumm. MIDI → SID reduziert ein Stück auf drei einstimmige Linien.\n"
+    "Beide Konvertierungen sind Näherungen. SID → MIDI emuliert den 6502-Prozessor und die SID-Register; Tunes, die echte C64-Hardware voraussetzen (BASIC-Programme), bleiben stumm; RSID-Dateien werden gar nicht erst aufgenommen. MIDI → SID reduziert ein Stück auf drei einstimmige Linien.\n"
     "\n"
     "Alle Daten bleiben auf deinem Rechner. Die HVSC gehört ihren Machern – bitte beachte ihre Hinweise (hvsc.c64.org).\n";
 
@@ -35,17 +37,19 @@ const char* const kAboutEn =
     "WHAT DOES THIS PROGRAM DO?\n"
     "SIDiMIDI connects the Commodore 64 with modern music production: it manages SID collections such as the High Voltage SID Collection (HVSC), shows the course of every tune as a picture – and converts between SID and MIDI files in both directions.\n"
     "\n"
-    "TAB “C64-SID”\n"
+    "TAB “SID>MIDI”\n"
     "• Add folders with “Folders” or by dragging them into the window – including the complete HVSC. “Read” builds the database: title, author, year and company, number of songs, length, SID type (6581/8580), PAL/NTSC, addresses. If the folder belongs to the HVSC, song lengths, STIL texts, bug notes as well as composer and country are added. Later reads only look at new or changed files.\n"
     "• Ratings (stars) and favourites (heart) live only in the database, never in the files. They survive when an HVSC update renames or moves files – SIDiMIDI recognises them by their content.\n"
     "• Write protection: “Folders → Write-protected”. In such a folder SIDiMIDI never changes, moves, deletes or overwrites anything, and no conversion is written there.\n"
     "• Search and filter: the search field on top (several words = and, !word = without), a filter mask under every column (numbers: 5, >3, 2-4; length: >3:00), plus filters by origin and minimum rating.\n"
     "• The display below shows the course of the selected tune: the three SID voices in three colours (1 orange, 2 cyan, 3 green) as pitch over time. Brightness follows the volume envelope, the bar shape shows the waveform (pulse: solid, sawtooth: light edge, triangle: slim, noise: pale). Below run the filter cutoff and the master volume. A click jumps to that point, Ctrl + mouse wheel zooms, a double click shows everything again, a click on a voice name mutes the voice.\n"
-    "• Right click on a tune: play, convert to MIDI (per song, four levels of detail), rate, manage the file, search the web, loupe.\n"
+    "• Above the picture sits the playback control: ▶ / ❚❚ (play, pause), ■ (stop), the loop symbol (repeat: after a tune ends play the next one in the list, and start again at the top when the list ends) and the position bar with the time – a click on it jumps.\n"
+    "• RSID files (they need a complete C64) cannot be played here and therefore do not appear in the list at all.\n"
+    "• Right click on a tune: play, convert to MIDI (per song: straight into the SID folder or “Save as …” with a file name; four levels of detail), rate, manage the file, search the web, loupe.\n"
     "• “HVSC” button: shows the installed version, looks up the newest online and installs the update.\n"
     "\n"
-    "TAB “MIDI → SID”\n"
-    "Open a folder with MIDI files; behind each name the conversion depths appear as buttons. The large text area explains exactly what they can do – and where the limits are.\n"
+    "TAB “MIDI>SID”\n"
+    "Open a folder with MIDI files; behind each name the conversion depths appear as buttons. A click on one opens the save dialog and converts at once. The large text area below the list explains exactly what the depths can do – and where the limits are.\n"
     "\n"
     "OPERATION\n"
     "• The interface scales steplessly: drag the window (automatic), Ctrl + mouse wheel, Ctrl + / − / 0 – or set a fixed value under “Settings”.\n"
@@ -53,7 +57,7 @@ const char* const kAboutEn =
     "• Update check: one request to GitHub per day; can be switched off under “Settings”.\n"
     "\n"
     "LIMITS\n"
-    "Both conversions are approximations. SID → MIDI emulates the 6502 processor and the SID registers; tunes that need real C64 hardware (BASIC programs, some RSID files) stay silent. MIDI → SID reduces a piece to three monophonic lines.\n"
+    "Both conversions are approximations. SID → MIDI emulates the 6502 processor and the SID registers; tunes that need real C64 hardware (BASIC programs) stay silent; RSID files are not taken into the list at all. MIDI → SID reduces a piece to three monophonic lines.\n"
     "\n"
     "All data stays on your computer. The HVSC belongs to its makers – please respect their notes (hvsc.c64.org).\n";
 
@@ -61,17 +65,19 @@ const char* const kAboutFr =
     "QUE FAIT CE PROGRAMME ?\n"
     "SIDiMIDI relie le Commodore 64 à la production musicale moderne : il gère des collections SID comme la High Voltage SID Collection (HVSC), montre le déroulement de chaque morceau sous forme d’image – et convertit dans les deux sens entre fichiers SID et MIDI.\n"
     "\n"
-    "ONGLET « C64-SID »\n"
+    "ONGLET « SID>MIDI »\n"
     "• Ajoutez des dossiers avec « Dossiers » ou en les glissant dans la fenêtre – y compris la HVSC complète. « Lire » construit la base de données : titre, auteur, année et société, nombre de morceaux, durée, type de SID (6581/8580), PAL/NTSC, adresses. Si le dossier fait partie de la HVSC, s’y ajoutent les durées, les textes STIL, les notes de bogues ainsi que le compositeur et le pays. Les lectures suivantes ne regardent que les fichiers nouveaux ou modifiés.\n"
     "• Notes (étoiles) et favoris (cœur) ne sont que dans la base, jamais dans les fichiers. Ils survivent quand une mise à jour de la HVSC renomme ou déplace des fichiers – SIDiMIDI les reconnaît à leur contenu.\n"
     "• Protection en écriture : « Dossiers → Protégé en écriture ». Dans un tel dossier, SIDiMIDI ne modifie, ne déplace, ne supprime ni n’écrase rien, et aucune conversion n’y est écrite.\n"
     "• Recherche et filtres : le champ de recherche en haut (plusieurs mots = et, !mot = sans), un masque de filtre sous chaque colonne (nombres : 5, >3, 2-4 ; durée : >3:00), plus des filtres par origine et par note minimale.\n"
     "• L’affichage en bas montre le déroulement du morceau sélectionné : les trois voix du SID en trois couleurs (1 orange, 2 cyan, 3 vert) comme hauteur au fil du temps. La luminosité suit l’enveloppe de volume, la forme de la barre montre la forme d’onde (pulse : pleine, dent de scie : bord clair, triangle : fine, bruit : pâle). En dessous défilent la coupure du filtre et le volume général. Un clic saute à cet endroit, Ctrl + molette zoome, un double clic montre tout, un clic sur le nom d’une voix la coupe.\n"
-    "• Clic droit sur un morceau : jouer, convertir en MIDI (par morceau, quatre niveaux de détail), noter, gérer le fichier, chercher sur le web, loupe.\n"
+    "• Au-dessus de l’image se trouve la commande de lecture : ▶ / ❚❚ (jouer, pause), ■ (arrêt), le symbole de boucle (répéter : à la fin d’un morceau, jouer le suivant de la liste, et recommencer en haut à la fin de la liste) et la barre de position avec le temps – un clic dessus saute.\n"
+    "• Les fichiers RSID (ils exigent un C64 complet) ne peuvent pas être joués ici et n’apparaissent donc pas dans la liste.\n"
+    "• Clic droit sur un morceau : jouer, convertir en MIDI (par morceau : directement dans le dossier du SID ou « Enregistrer sous … » avec un nom ; quatre niveaux de détail), noter, gérer le fichier, chercher sur le web, loupe.\n"
     "• Bouton « HVSC » : montre la version installée, cherche la plus récente en ligne et installe la mise à jour.\n"
     "\n"
-    "ONGLET « MIDI → SID »\n"
-    "Ouvrez un dossier de fichiers MIDI ; derrière chaque nom, les profondeurs de conversion apparaissent sous forme de boutons. La grande zone de texte explique précisément ce qu’elles savent faire – et où sont les limites.\n"
+    "ONGLET « MIDI>SID »\n"
+    "Ouvrez un dossier de fichiers MIDI ; derrière chaque nom, les profondeurs de conversion apparaissent sous forme de boutons. Un clic dessus ouvre la boîte d’enregistrement et convertit aussitôt. La grande zone de texte sous la liste explique précisément ce que savent faire les profondeurs – et où sont les limites.\n"
     "\n"
     "UTILISATION\n"
     "• L’interface se met à l’échelle en continu : tirez la fenêtre (automatique), Ctrl + molette, Ctrl + / − / 0 – ou une valeur fixe sous « Réglages ».\n"
@@ -79,7 +85,7 @@ const char* const kAboutFr =
     "• Recherche de mises à jour : une requête par jour vers GitHub ; désactivable sous « Réglages ».\n"
     "\n"
     "LIMITES\n"
-    "Les deux conversions sont des approximations. SID → MIDI émule le processeur 6502 et les registres du SID ; les morceaux qui exigent le vrai matériel C64 (programmes BASIC, certains fichiers RSID) restent muets. MIDI → SID réduit une pièce à trois lignes monophoniques.\n"
+    "Les deux conversions sont des approximations. SID → MIDI émule le processeur 6502 et les registres du SID ; les morceaux qui exigent le vrai matériel C64 (programmes BASIC) restent muets ; les fichiers RSID ne sont pas repris dans la liste. MIDI → SID réduit une pièce à trois lignes monophoniques.\n"
     "\n"
     "Toutes les données restent sur votre ordinateur. La HVSC appartient à ses auteurs – respectez leurs consignes (hvsc.c64.org).\n";
 
@@ -87,7 +93,7 @@ const char* const kTipsDe =
     "TASTEN UND MAUS\n"
     "• Leertaste: markierten Tune abspielen / pausieren · Esc: Stopp · Enter oder Doppelklick: abspielen\n"
     "• Alt + →/←: nächster / vorheriger Tune · Strg + F: Suchfeld\n"
-    "• Alt + 1 / Alt + 2: Reiter C64-SID / MIDI → SID · F1: dieses Fenster\n"
+    "• Alt + 1 / Alt + 2: Reiter SID>MIDI / MIDI>SID · F1: dieses Fenster\n"
     "• Strg + Mausrad, Strg + + / − / 0: Oberfläche stufenlos vergrößern, verkleinern, auf Automatik\n"
     "• Rechtsklick in einen freien Bereich: Maus-Lupe an/aus · Rechtsklick auf einen Tune: Menü\n"
     "\n"
@@ -104,13 +110,14 @@ const char* const kTipsDe =
     "\n"
     "KONVERTIEREN\n"
     "• Rechtsklick auf einen Tune → Nach MIDI konvertieren → Song wählen. Die MIDI-Datei enthält vier Auflösungsstufen (Spur 1–3 einfach … Spur 10–12 mit Pitch-Bend und Controllern)\n"
-    "• Es wird nie überschrieben: gibt es den Dateinamen schon, wird durchnummeriert\n";
+    "• Zwei Wege, beide laufen sofort: „Direkt in den SID-Ordner“ (neben die SID-Datei, gibt es den Namen schon, wird durchnummeriert) oder „Speichern unter …“ mit eigenem Dateinamen. SIDiMIDI merkt sich den zuletzt gewählten Zielordner, auch nach einem Neustart\n"
+    "• Ordner-Dialoge zeigen auch die Dateien im Ordner, damit man sieht, was darin liegt\n";
 
 const char* const kTipsEn =
     "KEYS AND MOUSE\n"
     "• Space: play / pause the selected tune · Esc: stop · Enter or double click: play\n"
     "• Alt + →/←: next / previous tune · Ctrl + F: search field\n"
-    "• Alt + 1 / Alt + 2: tab C64-SID / MIDI → SID · F1: this window\n"
+    "• Alt + 1 / Alt + 2: tab SID>MIDI / MIDI>SID · F1: this window\n"
     "• Ctrl + mouse wheel, Ctrl + + / − / 0: scale the interface steplessly, smaller, back to automatic\n"
     "• Right click in a free area: mouse loupe on/off · right click on a tune: menu\n"
     "\n"
@@ -127,13 +134,14 @@ const char* const kTipsEn =
     "\n"
     "CONVERTING\n"
     "• Right click on a tune → Convert to MIDI → choose a song. The MIDI file holds four levels of detail (tracks 1–3 simple … tracks 10–12 with pitch bend and controllers)\n"
-    "• Nothing is ever overwritten: if the file name exists, a number is added\n";
+    "• Two ways, both run at once: “Straight into the SID folder” (next to the SID file; if the name exists a number is added) or “Save as …” with your own file name. SIDiMIDI remembers the folder you chose last, also after a restart\n"
+    "• Folder dialogs also list the files inside the folder, so you can see what is in it\n";
 
 const char* const kTipsFr =
     "TOUCHES ET SOURIS\n"
     "• Espace : jouer / mettre en pause le morceau sélectionné · Échap : arrêt · Entrée ou double clic : jouer\n"
     "• Alt + →/← : morceau suivant / précédent · Ctrl + F : champ de recherche\n"
-    "• Alt + 1 / Alt + 2 : onglet C64-SID / MIDI → SID · F1 : cette fenêtre\n"
+    "• Alt + 1 / Alt + 2 : onglet SID>MIDI / MIDI>SID · F1 : cette fenêtre\n"
     "• Ctrl + molette, Ctrl + + / − / 0 : agrandir, réduire l’interface en continu, retour à l’automatique\n"
     "• Clic droit dans une zone libre : loupe de souris activée/désactivée · clic droit sur un morceau : menu\n"
     "\n"
@@ -150,13 +158,14 @@ const char* const kTipsFr =
     "\n"
     "CONVERTIR\n"
     "• Clic droit sur un morceau → Convertir en MIDI → choisir un morceau. Le fichier MIDI contient quatre niveaux de détail (pistes 1–3 simples … pistes 10–12 avec pitch bend et contrôleurs)\n"
-    "• Rien n’est jamais écrasé : si le nom existe déjà, un numéro est ajouté\n";
+    "• Deux voies, toutes deux exécutées aussitôt : « Directement dans le dossier du SID » (à côté du fichier SID ; si le nom existe, un numéro est ajouté) ou « Enregistrer sous … » avec votre propre nom. SIDiMIDI retient le dernier dossier choisi, même après un redémarrage\n"
+    "• Les boîtes de dossiers montrent aussi les fichiers du dossier, pour voir ce qu’il contient\n";
 
 const char* const kMidiDe =
     "MIDI → SID: MÖGLICHKEITEN UND GRENZEN\n"
     "\n"
     "DER WEG\n"
-    "Links steht der geöffnete Ordner mit seinen MIDI-Dateien. Hinter jedem Dateinamen sitzen die Konvertierungstiefen als Knöpfe. SIDiMIDI schreibt daraus eine .sid-Datei (PSID v2, PAL) neben die MIDI-Datei – oder in den Ausgabeordner, den du oben wählst. Dabei wird nie eine vorhandene Datei überschrieben: Gibt es den Namen schon, wird durchnummeriert. In einem schreibgeschützten Ordner schreibt SIDiMIDI nichts.\n"
+    "Oben steht der geöffnete Ordner mit seinen MIDI-Dateien. Hinter jedem Dateinamen sitzen die Konvertierungstiefen als Knöpfe. Ein Klick auf einen Knopf öffnet den Speichern-Dialog – vorgeschlagen werden der geöffnete MIDI-Ordner und der Name der MIDI-Datei – und schreibt danach sofort die .sid-Datei (PSID v2, PAL). Einen vorhandenen Namen fragt der Dialog vor dem Überschreiben ab. Bei „Gezielt …“ erscheint der Dialog nach der Spurwahl. In einem schreibgeschützten Ordner schreibt SIDiMIDI nichts.\n"
     "\n"
     "DIE KONVERTIERUNGSTIEFEN\n"
     "SCHNELL – Das Programm wählt selbst die drei notenreichsten Spuren, sortiert sie nach mittlerer Tonhöhe (tiefste = Stimme 1, höchste = Stimme 3) und legt je Stimme einen Klang fest: Spuren auf MIDI-Kanal 10 werden zu Schlagzeug (Rauschen), GM-Programme 17–80 zu Sägezahn (Orgel, Gitarre, Blech, Holz, Streicher), alles andere zu Dreieck (Klavier, Bass, weiche Klänge). Ideal für einen ersten Höreindruck.\n"
@@ -176,14 +185,14 @@ const char* const kMidiDe =
     "• Titel der SID-Datei = Dateiname, Autor = „SIDiMIDI (MIDI to SID)“.\n"
     "\n"
     "GUT ZU WISSEN\n"
-    "Perfekt ist die Konvertierung nicht und kann es bei diesem Format nicht sein: Sie ist eine Näherung, die das Wesentliche – Melodie, Bass und Takt – auf den Chip bringt. Je klarer sich die MIDI-Datei in drei einstimmige Linien zerlegen lässt, desto besser das Ergebnis. Das Ergebnis lässt sich mit dem Knopf ▶ hinter dem Dateinamen sofort anhören. Liegt es in einem Archiv-Ordner, erscheint es im Reiter C64-SID, wo Darstellung und Rückwandlung nach MIDI warten.\n"
+    "Perfekt ist die Konvertierung nicht und kann es bei diesem Format nicht sein: Sie ist eine Näherung, die das Wesentliche – Melodie, Bass und Takt – auf den Chip bringt. Je klarer sich die MIDI-Datei in drei einstimmige Linien zerlegen lässt, desto besser das Ergebnis. Das Ergebnis lässt sich mit dem Knopf ▶ hinter dem Dateinamen sofort anhören. Liegt es in einem Archiv-Ordner, erscheint es im Reiter SID>MIDI, wo Darstellung und Rückwandlung nach MIDI warten.\n"
     "Die Abspielroutine („miniplayer2“ von Lasse Öörni / Cadaver, MIT-Lizenz) und der Assembler (DASM) sind im Programm eingebaut.\n";
 
 const char* const kMidiEn =
     "MIDI → SID: POSSIBILITIES AND LIMITS\n"
     "\n"
     "THE WAY\n"
-    "On the left is the opened folder with its MIDI files. Behind each file name the conversion depths sit as buttons. SIDiMIDI writes a .sid file (PSID v2, PAL) next to the MIDI file – or into the output folder you choose above. An existing file is never overwritten: if the name exists, a number is added. SIDiMIDI writes nothing into a write-protected folder.\n"
+    "At the top is the opened folder with its MIDI files. Behind each file name the conversion depths sit as buttons. A click on a button opens the save dialog – it suggests the opened MIDI folder and the name of the MIDI file – and then writes the .sid file (PSID v2, PAL) at once. The dialog asks before an existing name is overwritten. With “Targeted …” the dialog appears after you have chosen the tracks. SIDiMIDI writes nothing into a write-protected folder.\n"
     "\n"
     "THE CONVERSION DEPTHS\n"
     "QUICK – The program picks the three tracks with the most notes, sorts them by average pitch (lowest = voice 1, highest = voice 3) and chooses a sound per voice: tracks on MIDI channel 10 become drums (noise), GM programs 17–80 become sawtooth (organ, guitar, brass, woodwind, strings), everything else becomes triangle (piano, bass, soft sounds). Ideal for a first impression.\n"
@@ -203,14 +212,14 @@ const char* const kMidiEn =
     "• Title of the SID file = file name, author = “SIDiMIDI (MIDI to SID)”.\n"
     "\n"
     "GOOD TO KNOW\n"
-    "The conversion is not perfect and cannot be with this format: it is an approximation that puts the essentials – melody, bass and beat – onto the chip. The more clearly the MIDI file splits into three monophonic lines, the better the result. You can listen to the result at once with the ▶ button behind the file name. If it lies in an archive folder it appears in the tab C64-SID, where the display and the conversion back to MIDI wait.\n"
+    "The conversion is not perfect and cannot be with this format: it is an approximation that puts the essentials – melody, bass and beat – onto the chip. The more clearly the MIDI file splits into three monophonic lines, the better the result. You can listen to the result at once with the ▶ button behind the file name. If it lies in an archive folder it appears in the tab SID>MIDI, where the display and the conversion back to MIDI wait.\n"
     "The player routine (“miniplayer2” by Lasse Öörni / Cadaver, MIT licence) and the assembler (DASM) are built into the program.\n";
 
 const char* const kMidiFr =
     "MIDI → SID : POSSIBILITÉS ET LIMITES\n"
     "\n"
     "LE CHEMIN\n"
-    "À gauche se trouve le dossier ouvert avec ses fichiers MIDI. Derrière chaque nom de fichier, les profondeurs de conversion sont des boutons. SIDiMIDI écrit un fichier .sid (PSID v2, PAL) à côté du fichier MIDI – ou dans le dossier de sortie choisi en haut. Un fichier existant n’est jamais écrasé : si le nom existe, un numéro est ajouté. SIDiMIDI n’écrit rien dans un dossier protégé en écriture.\n"
+    "En haut se trouve le dossier ouvert avec ses fichiers MIDI. Derrière chaque nom de fichier, les profondeurs de conversion sont des boutons. Un clic sur un bouton ouvre la boîte d’enregistrement – elle propose le dossier MIDI ouvert et le nom du fichier MIDI – puis écrit aussitôt le fichier .sid (PSID v2, PAL). La boîte demande avant d’écraser un nom existant. Avec « Ciblé … », la boîte apparaît après le choix des pistes. SIDiMIDI n’écrit rien dans un dossier protégé en écriture.\n"
     "\n"
     "LES PROFONDEURS DE CONVERSION\n"
     "RAPIDE – Le programme choisit lui-même les trois pistes les plus riches en notes, les trie par hauteur moyenne (la plus grave = voix 1, la plus aiguë = voix 3) et fixe un son par voix : les pistes du canal MIDI 10 deviennent de la batterie (bruit), les programmes GM 17–80 une dent de scie (orgue, guitare, cuivres, bois, cordes), tout le reste un triangle (piano, basse, sons doux). Idéal pour une première écoute.\n"
@@ -230,7 +239,7 @@ const char* const kMidiFr =
     "• Titre du fichier SID = nom du fichier, auteur = « SIDiMIDI (MIDI to SID) ».\n"
     "\n"
     "BON À SAVOIR\n"
-    "La conversion n’est pas parfaite et ne peut pas l’être avec ce format : c’est une approximation qui met l’essentiel – mélodie, basse et rythme – sur la puce. Plus le fichier MIDI se décompose clairement en trois lignes monophoniques, meilleur est le résultat. Le résultat s’écoute aussitôt avec le bouton ▶ derrière le nom du fichier. S’il se trouve dans un dossier d’archive, il apparaît dans l’onglet C64-SID, où l’affichage et la reconversion en MIDI l’attendent.\n"
+    "La conversion n’est pas parfaite et ne peut pas l’être avec ce format : c’est une approximation qui met l’essentiel – mélodie, basse et rythme – sur la puce. Plus le fichier MIDI se décompose clairement en trois lignes monophoniques, meilleur est le résultat. Le résultat s’écoute aussitôt avec le bouton ▶ derrière le nom du fichier. S’il se trouve dans un dossier d’archive, il apparaît dans l’onglet SID>MIDI, où l’affichage et la reconversion en MIDI l’attendent.\n"
     "La routine de lecture (« miniplayer2 » de Lasse Öörni / Cadaver, licence MIT) et l’assembleur (DASM) sont intégrés au programme.\n";
 } // namespace
 

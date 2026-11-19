@@ -1,4 +1,6 @@
 #include "SidTable.h"
+#include "SidTrace.h"
+#include "SidView.h"
 #include <algorithm>
 
 namespace sm
@@ -13,6 +15,7 @@ const ColDef kCols[] = {
     { cReleased, "Veröffentlicht", 150, false, true,  "Jahr und Firma aus dem SID-Kopf" },
     { cSongs,    "Songs",          52,  true,  true,  "Anzahl der Songs (Subtunes)" },
     { cLength,   "Länge",          58,  true,  true,  "Länge des Start-Songs (Songlängen-Datenbank der HVSC)" },
+    { cLandscape, "Verlauf",       170, false, true,  "Miniatur des Ablaufs: die drei Stimmen als Stapellandschaft (wird im Hintergrund für die sichtbaren Zeilen berechnet)" },
     { cType,     "Typ",            76,  false, true,  "PSID oder RSID mit Versionsnummer" },
     { cSid,      "SID",            74,  false, true,  "SID-Chip-Typ laut Kopf: 6581 oder 8580" },
     { cClock,    "Takt",           68,  false, true,  "PAL oder NTSC laut Kopf" },
@@ -174,14 +177,18 @@ SidTable::SidTable (Archive& a) : arch (a), table ("sids", this)
     auto& hdr = table.getHeader();
     int flags = juce::TableHeaderComponent::resizable | juce::TableHeaderComponent::sortable | juce::TableHeaderComponent::draggable | juce::TableHeaderComponent::appearsOnColumnMenu;
     for (auto& c : kCols)
-        hdr.addColumn (T (c.name), c.id, c.width, 24, 600, c.visible ? (flags | juce::TableHeaderComponent::visible) : flags);
+    {
+        int f = c.visible ? (flags | juce::TableHeaderComponent::visible) : flags;
+        if (c.id == cLandscape) f &= ~juce::TableHeaderComponent::sortable;
+        hdr.addColumn (T (c.name), c.id, c.width, 24, 600, f);
+    }
     hdr.setSortColumnId (sortCol, sortForward);
     hdr.addListener (watcherOf (watcher));
     table.getViewport()->getHorizontalScrollBar().addListener (watcherOf (watcher));
 
     for (auto& c : kCols)
     {
-        if (c.id == cFav) continue;
+        if (c.id == cFav || c.id == cLandscape) continue;
         auto ed = std::make_unique<juce::TextEditor>();
         ed->setFont (ui::font (12.5f));
         ed->setIndents (4, 3);
@@ -197,6 +204,8 @@ SidTable::SidTable (Archive& a) : arch (a), table ("sids", this)
 SidTable::~SidTable()
 {
     stopTimer();
+    lsState->alive = false;
+    landscapePool.removeAllJobs (true, 5000);
     table.getHeader().removeListener (watcherOf (watcher));
     table.getViewport()->getHorizontalScrollBar().removeListener (watcherOf (watcher));
     delete watcherOf (watcher);
@@ -381,7 +390,17 @@ void SidTable::restoreLayout (const juce::String& s)
 {
     if (s.isEmpty()) return;
     auto lines = juce::StringArray::fromLines (s);
-    if (lines.size() >= 1 && lines[0].isNotEmpty()) table.getHeader().restoreFromString (lines[0]);
+    if (lines.size() >= 1 && lines[0].isNotEmpty())
+    {
+        auto& hdr = table.getHeader();
+        hdr.restoreFromString (lines[0]);
+        // a layout saved before the "Verlauf" column existed: show the new column behind "Länge"
+        if (! lines[0].contains ("id=\"" + juce::String (cLandscape) + "\""))
+        {
+            hdr.setColumnVisible (cLandscape, true);
+            hdr.moveColumn (cLandscape, hdr.getIndexOfColumnId (cLength, false) + 1);
+        }
+    }
     if (lines.size() >= 2)
     {
         sortCol = lines[1].upToFirstOccurrenceOf (",", false, false).getIntValue();
@@ -426,7 +445,7 @@ void SidTable::paint (juce::Graphics& g)
 void SidTable::paintRowBackground (juce::Graphics& g, int row, int w, int h, bool selected)
 {
     const auto& th = theme();
-    auto c = (row & 1) ? th.panel : th.panel.interpolatedWith (th.panel2, 0.35f);
+    auto c = ui::rowColour (th, row);
     if (selected) c = th.accent.withAlpha (0.38f).withMultipliedSaturation (0.9f);
     g.setColour (c);
     g.fillRect (0, 0, w, h);
@@ -449,9 +468,21 @@ void SidTable::paintCell (juce::Graphics& g, int row, int col, int w, int h, boo
         {
             juce::Path star;
             star.addStar ({ 4.0f + sw * ((float) i + 0.5f), (float) h * 0.5f }, 5, sw * 0.22f, sw * 0.5f);
-            g.setColour (i < e->rating ? juce::Colour (0xffffc933) : th.dim.withAlpha (0.25f));
+            g.setColour (i < e->rating ? ui::starColour (th, i) : th.dim.withAlpha (0.25f));
             g.fillPath (star);
         }
+        return;
+    }
+    if (col == cLandscape)
+    {
+        if (e->has (fMissing) || e->has (fError)) return;
+        auto* vp = table.getViewport();
+        const int rh = std::max (1, table.getRowHeight());
+        lsState->from = vp->getViewPositionY() / rh;
+        lsState->to = (vp->getViewPositionY() + vp->getViewHeight()) / rh;
+        auto it = landscapes.find (e->id);
+        if (it == landscapes.end()) requestLandscape (*e, row);
+        drawLandscape (g, it != landscapes.end() ? it->second.get() : nullptr, w, h);
         return;
     }
     if (col == cFav)
@@ -475,6 +506,99 @@ void SidTable::paintCell (juce::Graphics& g, int row, int col, int w, int h, boo
     {
         g.setColour (th.dim);
         g.drawHorizontalLine (h / 2, 4.0f, juce::jmin ((float) w - 4.0f, 6.0f + juce::GlyphArrangement::getStringWidth (ui::font (13.0f), text)));
+    }
+}
+
+void SidTable::requestLandscape (const Entry& e, int row)
+{
+    if (! landscapeAsked.insert (e.id).second) return;
+    const int id = e.id, song = e.startSong;
+    const auto path = e.path;
+    const double known = e.lengthOf (e.startSong);
+    auto state = lsState;
+    juce::Component::SafePointer<SidTable> safe (this);
+    landscapePool.addJob ([safe, state, id, song, path, known, row]
+    {
+        auto forget = [safe, id] { juce::MessageManager::callAsync ([safe, id] { if (safe != nullptr) safe->landscapeAsked.erase (id); }); };
+        // the row was scrolled out of sight while it waited: skip it (it is asked again when it comes back)
+        if (! state->alive || row < state->from.load() - 3 || row > state->to.load() + 3) { forget(); return; }
+        const auto si = parseSidFile (juce::File (path), true);
+        if (! si.valid) { forget(); return; }
+        const double want = known > 0 ? std::min (known + 1.0, 240.0) : 120.0;
+        auto t = computeTrace (si, std::max (1, song), want, [state] { return ! state->alive.load(); }, 6.0);
+        if (! state->alive) return;
+        auto l = std::make_shared<Landscape>();
+        const int n = Landscape::kBuckets;
+        for (auto& v : l->height) v.assign ((size_t) n, 0);
+        if (t != nullptr && t->frames > 0)
+        {
+            // mean pitch of the sounding frames per time bucket; every voice uses its own pitch range, so the ridges stay lively
+            for (int v = 0; v < 3; ++v)
+            {
+                std::vector<float> mean ((size_t) n, -1.0f);
+                float lo = 1000.0f, hi = -1000.0f;
+                for (int b = 0; b < n; ++b)
+                {
+                    const juce::uint32 f0 = (juce::uint32) ((juce::int64) b * t->frames / n);
+                    const juce::uint32 f1 = std::max<juce::uint32> (f0 + 1, (juce::uint32) ((juce::int64) (b + 1) * t->frames / n));
+                    double sum = 0; int cnt = 0;
+                    for (juce::uint32 f = f0; f < f1 && f < t->frames; ++f) if (t->v[v].note[f] >= 0.0f) { sum += t->v[v].note[f]; ++cnt; }
+                    if (cnt > 0) { mean[(size_t) b] = (float) (sum / cnt); lo = std::min (lo, mean[(size_t) b]); hi = std::max (hi, mean[(size_t) b]); }
+                }
+                const float range = std::max (10.0f, hi - lo);
+                for (int b = 0; b < n; ++b)
+                    if (mean[(size_t) b] >= 0.0f)
+                        l->height[(size_t) v][(size_t) b] = (juce::uint8) juce::jlimit (1, 255, 40 + (int) (215.0f * (mean[(size_t) b] - lo) / range));
+            }
+        }
+        juce::MessageManager::callAsync ([safe, id, l]
+        {
+            if (safe == nullptr) return;
+            auto& self = *safe;
+            if (self.landscapes.size() > 20000) self.landscapes.clear();
+            self.landscapes[id] = l;
+            const int r = self.rowOf (id);
+            if (r >= 0) self.table.repaintRow (r);
+        });
+    });
+}
+
+void SidTable::drawLandscape (juce::Graphics& g, const Landscape* l, int w, int h)
+{
+    const auto& th = theme();
+    const bool light = th.bg.getBrightness() > 0.5f;
+    const float pad = 2.0f, bandH = ((float) h - 2.0f * pad) / 3.0f;
+    for (int v = 0; v < 3; ++v)
+    {
+        const float top = pad + bandH * (float) v, base = top + bandH - 1.0f, span = bandH - 2.0f;
+        const auto vc = voiceColour (v, light);
+        if (l == nullptr)
+        {
+            g.setColour (th.dim.withAlpha (0.22f));
+            g.drawHorizontalLine ((int) base, 4.0f, (float) w - 4.0f);
+            continue;
+        }
+        const auto& hs = l->height[(size_t) v];
+        const float x0 = 4.0f, x1 = (float) w - 4.0f;
+        juce::Path fill, line;
+        fill.startNewSubPath (x0, base);
+        bool open = false;
+        for (int i = 0; i < Landscape::kBuckets; ++i)
+        {
+            const float x = x0 + (x1 - x0) * ((float) i + 0.5f) / (float) Landscape::kBuckets;
+            const float y = base - span * (float) hs[(size_t) i] / 255.0f;
+            fill.lineTo (x, y);
+            if (hs[(size_t) i] > 0) { if (! open) { line.startNewSubPath (x, y); open = true; } else line.lineTo (x, y); }
+            else open = false;
+        }
+        fill.lineTo (x1, base);
+        fill.closeSubPath();
+        g.setColour (vc.withAlpha (0.45f));
+        g.fillPath (fill);
+        g.setColour (vc.withAlpha (0.95f));
+        g.strokePath (line, juce::PathStrokeType (1.0f));
+        g.setColour (th.dim.withAlpha (0.18f));
+        g.drawHorizontalLine ((int) base, x0, x1);
     }
 }
 

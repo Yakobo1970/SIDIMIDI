@@ -52,7 +52,7 @@ public:
         setColour (juce::AlertWindow::backgroundColourId, t.panel);
         setColour (juce::AlertWindow::textColourId, t.text);
         setColour (juce::CaretComponent::caretColourId, t.accent);
-        setColour (juce::ListBox::backgroundColourId, t.panel);
+        setColour (juce::ListBox::backgroundColourId, t.bg);
         setColour (juce::ListBox::textColourId, t.text);
         setColour (juce::DirectoryContentsDisplayComponent::highlightColourId, t.accent.withAlpha (0.35f));
         setColour (juce::DirectoryContentsDisplayComponent::textColourId, t.text);
@@ -156,6 +156,19 @@ inline void drawHeart (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour
     heart.cubicTo (cx + s * 0.45f, cy - s * 0.75f, cx + s * 0.9f, cy - s * 0.1f, cx, cy + s * 0.45f);
     g.setColour (c);
     g.fillPath (heart);
+}
+
+// background of a list row: every second row is a little darker (C64 blue by default)
+inline juce::Colour rowColour (const Theme& t, int row)
+{
+    return (row & 1) ? t.bg.darker (t.bg.getBrightness() > 0.5f ? 0.05f : 0.17f) : t.bg;
+}
+
+// the five rating stars take their colours from the SIDiMIDI logo letters
+inline juce::Colour starColour (const Theme& t, int index)
+{
+    static const int logoColour[5] = { 0, 3, 2, 1, 5 };
+    return t.track[(size_t) logoColour[juce::jlimit (0, 4, index)]];
 }
 
 inline juce::String hex2 (int v) { return juce::String::toHexString (v & 0xff).paddedLeft ('0', 2).toUpperCase(); }

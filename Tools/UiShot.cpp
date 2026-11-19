@@ -54,6 +54,32 @@ public:
                 wait (args.contains ("wait") ? arg ("wait").getIntValue() : 1200);
             }
             else wait (args.contains ("wait") ? arg ("wait").getIntValue() : 300);
+            if (const auto d = arg ("dialog"); d.isNotEmpty())
+            {
+                // opens the real dialog of the app (folder / save) and photographs the window
+                if (d == "folder") main.chooseFolder ("Test", [] (const juce::File&) {}, arg ("pattern").isNotEmpty() ? arg ("pattern") : juce::String ("*.sid"));
+                else main.chooseSaveFile ("Test", juce::File (arg ("dir")).getChildFile ("Beispiel.mid"), "*.mid", [] (const juce::File&) {});
+                wait (1500);
+                for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                    if (auto* c = juce::Desktop::getInstance().getComponent (i); c != nullptr && c != &host && c->isShowing() && c->getWidth() > 200)
+                        writePng (c->createComponentSnapshot (c->getLocalBounds(), true, 1.0f), juce::File (out.getFullPathName().replace (".png", "_" + juce::String (i) + ".png")));
+                quit();
+                return;
+            }
+            if (const auto d = arg ("folderdialog"); d.isNotEmpty())
+            {
+                // the folder dialog of chooseFolder() on its own: it lists the files of the folder too
+                juce::WildcardFileFilter filter (arg ("pattern", 1).isNotEmpty() ? arg ("pattern") : juce::String ("*.sid"), "*", "files");
+                juce::FileBrowserComponent browser (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories | juce::FileBrowserComponent::canSelectFiles,
+                                                    juce::File (d), &filter, nullptr);
+                browser.setLookAndFeel (&host.getLookAndFeel());
+                browser.setSize (760, 520);
+                wait (1500);
+                writePng (browser.createComponentSnapshot (browser.getLocalBounds(), true, 1.0f), out);
+                quit();
+                return;
+            }
+            if (args.contains ("prime")) { host.createComponentSnapshot (host.getLocalBounds(), true, 1.0f); wait (arg ("prime").getIntValue()); }   // paints once so lazy content (miniatures) starts loading
             if (const auto p = arg ("play"); p.isNotEmpty()) main.sidTab().view().setPlayFrame (p.getIntValue());
             if (args.contains ("about")) main.showAbout (true);
             if (args.contains ("tips")) { main.showAbout (true); }

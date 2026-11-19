@@ -54,7 +54,7 @@ private:
     std::vector<MidiItem> items;
     std::vector<int> shown;                  // indices into items (filtered, sorted)
     juce::File folder;
-    juce::TextButton openBtn, recentBtn, rescanBtn, outputBtn, stopBtn, fundusBtn;
+    juce::TextButton openBtn, recentBtn, rescanBtn, stopBtn, fundusBtn;
     juce::ToggleButton subfolders;
     juce::TextEditor search, description;
     juce::Label pathLabel, fundusText, descriptionTitle;
@@ -76,9 +76,8 @@ private:
     void startScan();
     void stopScan();
     void rebuildShown();
-    void showOutputMenu();
     void showRecentMenu();
-    juce::File sidTargetFor (const MidiItem& m) const;
+    void runConversion (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip, const juce::File& target);
     void timerCallback() override;
 
     // TableListBoxModel

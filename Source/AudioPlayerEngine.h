@@ -20,8 +20,10 @@ class AudioPlayerEngine : public juce::AudioSource,
                            private juce::Timer
 {
 public:
-    AudioPlayerEngine()
+    // openDevice = false: no audio device (offline rendering in the test tool via getNextAudioBlock)
+    explicit AudioPlayerEngine(bool openDevice = true)
     {
+        if (! openDevice) { deviceOpen = false; return; }
         auto error = audioDeviceManager.initialiseWithDefaultDevices(0, 2);
         if (error.isNotEmpty())
         {
@@ -35,6 +37,7 @@ public:
     ~AudioPlayerEngine() override
     {
         stop();
+        if (! deviceOpen) return;
         audioSourcePlayer.setSource(nullptr);
         audioDeviceManager.removeAudioCallback(&audioSourcePlayer);
     }
@@ -628,6 +631,22 @@ private:
         juce::MidiMessage message;
     };
 
+    // Applies a register write of the trace. A gate that goes 0 -> 1 restarts the envelope even when the
+    // tune switches the gate off and on again inside one frame (hard restart, e.g. "Testcard"): the sample
+    // renderer only sees the state at the end of the frame and would otherwise never notice the new note.
+    void applyTraceEvent(const SidCpU6502Engine::RegEvent& e)
+    {
+        int vi = -1;
+        if (e.reg <= 0x06) vi = 0;
+        else if (e.reg >= 0x07 && e.reg <= 0x0D) vi = 1;
+        else if (e.reg >= 0x0E && e.reg <= 0x14) vi = 2;
+        const bool control = vi >= 0 && (e.reg - vi * 7) == 4;
+        const bool wasGate = control && chip.voices[vi].isGateActive();
+        chip.applyRegisterEvent(e.reg, e.value);
+        if (control && ! wasGate && chip.voices[vi].isGateActive())
+            runtime[vi].envPhase = VoiceRuntime::EnvPhase::Attack;
+    }
+
     void seekLocked(uint32_t frame)
     {
         chip = SidChipState{};
@@ -641,7 +660,7 @@ private:
         currentEventIndex = 0;
         while (currentEventIndex < traceEvents.size() && traceEvents[currentEventIndex].frameIndex <= frame)
         {
-            chip.applyRegisterEvent(traceEvents[currentEventIndex].reg, traceEvents[currentEventIndex].value);
+            applyTraceEvent(traceEvents[currentEventIndex]);
             ++currentEventIndex;
         }
         currentFrameCounter = frame;
@@ -656,7 +675,7 @@ private:
         while (currentEventIndex < traceEvents.size() && traceEvents[currentEventIndex].frameIndex <= currentFrameCounter)
         {
             const auto& evt = traceEvents[currentEventIndex];
-            chip.applyRegisterEvent(evt.reg, evt.value);
+            applyTraceEvent(evt);
             currentEventIndex++;
         }
 
@@ -946,6 +965,7 @@ private:
     }
 
     juce::AudioDeviceManager audioDeviceManager;
+    bool deviceOpen = true;
     juce::AudioSourcePlayer audioSourcePlayer;
 
     // Schützt traceEvents/chip/runtime/isSidPlaying/isMidiPlaying/midiEvents/midiVisual*, die
