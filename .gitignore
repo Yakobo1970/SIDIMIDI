@@ -24,3 +24,6 @@ Installer/Output/
 
 # Lokale Editor-/Tool-Konfiguration (nicht Teil des Projekts)
 .claude/
+
+# CMake build tree (cmake -S . -B build)
+build/

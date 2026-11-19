@@ -7,6 +7,7 @@
 #include <memory>
 #include <iostream>
 #include "SidCpu6502Engine.h"
+#include "SidChip.h"
 
 //==============================================================================
 struct SidFileHeader
@@ -20,30 +21,10 @@ struct SidFileHeader
     uint16_t songs = 1;
     uint16_t startSong = 1;
     uint32_t speedFlags = 0;
+    uint16_t flags = 0;          // v2+: Bit 2-3 = Takt (1 PAL, 2 NTSC, 3 beide)
     char     title[32] = { 0 };
     char     author[32] = { 0 };
     char     released[32] = { 0 };
-};
-
-//==============================================================================
-// Control-Register-Bits: bit0=Gate, bit1=Sync, bit2=Ringmod, bit3=Test, bit4-7=Waveform.
-struct SIDVoiceData
-{
-    uint16_t frequency = 0;
-    uint16_t pulseWidth = 0;
-    uint8_t  controlReg = 0;
-    uint8_t  attackDecay = 0;
-    uint8_t  sustainRel = 0;
-
-    bool isGateActive() const { return (controlReg & 0x01) != 0; }
-    bool isSyncActive() const { return (controlReg & 0x02) != 0; }
-    bool isRingModActive() const { return (controlReg & 0x04) != 0; }
-    bool isTestActive() const { return (controlReg & 0x08) != 0; }
-    uint8_t getWaveform() const { return (controlReg >> 4) & 0x0F; }
-    uint8_t getAttackNibble() const { return (attackDecay >> 4) & 0x0F; }
-    uint8_t getDecayNibble() const { return attackDecay & 0x0F; }
-    uint8_t getSustainNibble() const { return (sustainRel >> 4) & 0x0F; }
-    uint8_t getReleaseNibble() const { return sustainRel & 0x0F; }
 };
 
 //==============================================================================
@@ -83,71 +64,6 @@ inline int sidNibbleTo7BitCC(uint8_t nibble)
 }
 
 //==============================================================================
-// Kompletter SID-Chip-Zustand (3 Voices + gemeinsamer Filter-/Lautstärkeblock),
-// aus einem RegEvent-Strom rekonstruiert. Einzige Quelle der reg->Feld-Dekodierung,
-// genutzt sowohl vom MIDI-Exporter als auch von der Live-SID-Vorschau, damit beide
-// nicht auseinanderdriften.
-struct SidChipState
-{
-    SIDVoiceData voices[3];
-
-    // Gemeinsamer Filter-/Lautstärkeblock ($D415-$D418)
-    uint16_t filterCutoff11 = 0;          // 11-bit: (FC_HI<<3)|(FC_LO&0x07)
-    uint8_t  resonanceNibble = 0;         // High-Nibble von $D417
-    uint8_t  routingMask = 0;             // Low-Nibble von $D417: bit0-2=Voice1-3 durch Filter geroutet, bit3=External
-    uint8_t  filterModeBits = 0;          // Bits 4-6 von $D418 (LP/BP/HP, kombinierbar), hier auf 0-7 normalisiert
-    bool     voice3Disconnected = false;  // Bit7 von $D418
-    // Low-Nibble von $D418. Default 15 (volle Lautstärke) statt 0: reale Hardware wird vom
-    // KERNAL beim Boot bereits auf Lautstärke gesetzt, was wir nicht emulieren - ein Tune, der
-    // $D418 nie explizit anfasst, soll deshalb nicht standardmäßig stumm sein.
-    uint8_t  masterVolumeNibble = 15;
-
-    bool isVoiceRoutedThroughFilter(int voiceIdx) const { return (routingMask & (1 << voiceIdx)) != 0; }
-
-    // Wendet ein SID-Register-Event (reg 0x00-0x18) auf den Zustand an.
-    // Rückgabe: betroffener Voice-Index (0-2), oder -1 für den Filter-/Lautstärkeblock.
-    int applyRegisterEvent(uint8_t reg, uint8_t value)
-    {
-        int voiceIdx = -1;
-        if (reg <= 0x06) voiceIdx = 0;
-        else if (reg >= 0x07 && reg <= 0x0D) voiceIdx = 1;
-        else if (reg >= 0x0E && reg <= 0x14) voiceIdx = 2;
-
-        if (voiceIdx >= 0)
-        {
-            auto& voice = voices[voiceIdx];
-            int regOffset = reg - (voiceIdx * 7);
-            switch (regOffset)
-            {
-            case 0: voice.frequency = (voice.frequency & 0xFF00) | value; break;
-            case 1: voice.frequency = (voice.frequency & 0x00FF) | ((uint16_t)value << 8); break;
-            case 2: voice.pulseWidth = (voice.pulseWidth & 0x0F00) | value; break;
-            case 3: voice.pulseWidth = (voice.pulseWidth & 0x00FF) | (((uint16_t)value & 0x0F) << 8); break;
-            case 4: voice.controlReg = value; break;
-            case 5: voice.attackDecay = value; break;
-            case 6: voice.sustainRel = value; break;
-            default: break;
-            }
-            return voiceIdx;
-        }
-
-        switch (reg)
-        {
-        case 0x15: filterCutoff11 = (filterCutoff11 & 0xFFF8) | (value & 0x07); break;
-        case 0x16: filterCutoff11 = (filterCutoff11 & 0x0007) | ((uint16_t)value << 3); break;
-        case 0x17: resonanceNibble = (value >> 4) & 0x0F; routingMask = value & 0x0F; break;
-        case 0x18:
-            filterModeBits = (value >> 4) & 0x07;
-            voice3Disconnected = (value & 0x80) != 0;
-            masterVolumeNibble = value & 0x0F;
-            break;
-        default: break;
-        }
-        return -1;
-    }
-};
-
-//==============================================================================
 class SidToMidiCoreEngine
 {
 public:
@@ -180,6 +96,8 @@ public:
         stream.read(&outHeader.title, 32);
         stream.read(&outHeader.author, 32);
         stream.read(&outHeader.released, 32);
+        if (outHeader.version >= 2 && outHeader.dataOffset >= 0x78)
+            outHeader.flags = (uint16_t)stream.readShortBigEndian();
 
         // Erzwingt Null-Terminierung: die Datei kann 32 Bytes ohne einziges
         // Null-Byte liefern, wonach juce::String(const char*) sonst über das
@@ -197,22 +115,10 @@ public:
             uint8_t high = (uint8_t)stream.readByte();
             outHeader.loadAddress = ((uint16_t)high << 8) | low;
         }
-        else
-        {
-            int64_t currentPos = stream.getPosition();
-            uint8_t b1 = (uint8_t)stream.readByte();
-            uint8_t b2 = (uint8_t)stream.readByte();
-            uint16_t potentialLoad = ((uint16_t)b2 << 8) | b1;
-
-            if (potentialLoad >= 0x0400 && potentialLoad <= 0xFFFF && potentialLoad != outHeader.loadAddress)
-            {
-                outHeader.loadAddress = potentialLoad;
-            }
-            else
-            {
-                stream.setPosition(currentPos);
-            }
-        }
+        // (PSID-Spezifikation: nur wenn die Ladeadresse im Kopf 0 ist, stehen die ersten zwei
+        // Datenbytes als Ladeadresse davor. Eine frühere Heuristik, die bei gesetzter Kopf-
+        // Adresse trotzdem die ersten Datenbytes als Adresse deutete, zerstörte Tunes, deren
+        // Code mit JMP beginnt.)
 
         if (outHeader.initAddress == 0)
         {
@@ -277,10 +183,10 @@ public:
     // Glides/Portamento muss der Pitch-Bend relativ zur bereits gehaltenen Note verankert
     // bleiben statt relativ zu einer bei jedem Aufruf neu gerundeten "nächstgelegenen" Note
     // - sonst entsteht ein unstetiger/sägezahnartiger Bend statt eines glatten Glides.
-    static bool sidFreqToContinuousNote(uint16_t sidFreq, double& outContinuousNote)
+    static bool sidFreqToContinuousNote(uint16_t sidFreq, double& outContinuousNote, double clockHz = 985248.0)
     {
         if (sidFreq == 0) return false;
-        double freqHz = (double)sidFreq * 985248.0 / 16777216.0;
+        double freqHz = (double)sidFreq * clockHz / 16777216.0;
         if (freqHz < 8.1758) return false;
         outContinuousNote = 69.0 + 12.0 * std::log2(freqHz / 440.0);
         return true;
@@ -289,7 +195,8 @@ public:
     static bool convertSidToMidiFile(const juce::File& sidFile,
         const juce::File& targetMidiFile,
         juce::String& logOutput,
-        int subsongIndex = 1)
+        int subsongIndex = 1,
+        double maxSeconds = 0.0)    // 0 = default (4 minutes); pass the HVSC length to export exactly the tune
     {
         std::cerr << "[DEBUG] convertSidToMidiFile gestartet f\xc3\xbcr: " << sidFile.getFileName().toStdString() << std::endl;
 
@@ -307,11 +214,26 @@ public:
 
         uint16_t effectivePlayAddress = (header.playAddress != 0) ? header.playAddress : header.initAddress;
 
-        auto traceEvents = SidCpU6502Engine::traceSidExecution(
+        // Bildrate des Tunes: Video (PAL/NTSC) oder CIA-1-Timer; daraus ergibt sich die MIDI-Zeit
+        SidCpU6502Engine::TraceOptions topt;
+        topt.ntsc = ((header.flags >> 2) & 3) == 2;
+        topt.ciaSpeed = subsongIndex >= 1 && subsongIndex <= 32 ? ((header.speedFlags >> (subsongIndex - 1)) & 1u) != 0 : ((header.speedFlags >> 31) & 1u) != 0;
+        topt.maxSeconds = 60.0;
+        const double wantSeconds = maxSeconds > 0.0 ? maxSeconds : 240.0;
+        const double rateGuess = topt.ciaSpeed ? 200.0 : (topt.ntsc ? 60.0 : 50.2);
+        auto traceResult = SidCpU6502Engine::traceSidExecutionEx(
             codeData.data(), codeData.size(),
             header.loadAddress, header.initAddress, effectivePlayAddress,
-            (uint16_t)subsongIndex, 30000
+            (uint16_t)subsongIndex, (uint32_t)std::ceil(wantSeconds * rateGuess), topt
         );
+        const double framesPerSecond = traceResult.framesPerSecond;
+        const double clockHz = topt.ntsc ? 1022727.0 : 985248.0;
+        auto traceEvents = std::move(traceResult.events);
+        {
+            const uint32_t lastFrame = (uint32_t)std::ceil(wantSeconds * framesPerSecond);
+            while (!traceEvents.empty() && traceEvents.back().frameIndex > lastFrame)
+                traceEvents.pop_back();
+        }
 
         logOutput += "Aufgezeichnete Register-Schreibzugriffe: " + juce::String((int)traceEvents.size()) + "\n";
 
@@ -324,7 +246,9 @@ public:
         juce::MidiFile midiFile;
         midiFile.setTicksPerQuarterNote(960);
 
-        const double ticksPerFrame = 19.2; // 50 Hz PAL bei 120 BPM
+        // 960 Ticks je Viertel bei 500000 us (120 BPM) = 1920 Ticks je Sekunde. (Früher stand hier 19.2
+        // = 38.4/2: die MIDI-Datei lief dadurch doppelt so schnell wie der SID.)
+        const double ticksPerFrame = 1920.0 / framesPerSecond;
         const double cyclesPerFrame = (double)SidCpU6502Engine::kCyclesPerFrame;
 
         // Track 0: nur noch Tempo/Titel/Autor als Meta-Events plus die Signatur (s.u.) - keine
@@ -414,7 +338,7 @@ public:
             if (isGate && voice.frequency > 0)
             {
                 double continuousNote;
-                if (sidFreqToContinuousNote(voice.frequency, continuousNote))
+                if (sidFreqToContinuousNote(voice.frequency, continuousNote, clockHz))
                 {
                     if (activeNotes[vIdx] < 0)
                     {

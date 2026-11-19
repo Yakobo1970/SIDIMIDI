@@ -93,4 +93,25 @@ public:
         uint16_t loadAddr, uint16_t initAddrIn,
         uint16_t playAddr, uint16_t subsong,
         uint32_t totalFrames = 30000);
+
+    // Full version: speed (video frame or CIA 1 timer), clock, cancel callback, result details.
+    struct TraceOptions
+    {
+        bool ciaSpeed = false;          // the sub-tune's speed flag (SID header): play routine is called by the CIA 1 timer
+        bool ntsc = false;              // NTSC machine (clock and default rate)
+        double maxSeconds = 25.0;       // safety limit for the emulation time (wall clock)
+        std::function<bool()> cancel;   // return true to abort
+    };
+    struct TraceResult
+    {
+        std::vector<RegEvent> events;
+        double framesPerSecond = 50.125;  // how often the play routine is called per second
+        uint32_t frames = 0;              // play calls emulated
+        bool timedOut = false, cancelled = false, noPlay = false;
+    };
+    static TraceResult traceSidExecutionEx (
+        const uint8_t* codeData, size_t codeSize,
+        uint16_t loadAddr, uint16_t initAddrIn,
+        uint16_t playAddr, uint16_t subsong,
+        uint32_t totalFrames, const TraceOptions& options);
 };

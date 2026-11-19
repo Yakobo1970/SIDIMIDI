@@ -1,5 +1,3 @@
-#define SID_DEBUG
-
 #include "SidCpu6502Engine.h"
 #include <algorithm>
 #include <cstdint>
@@ -552,8 +550,19 @@ std::vector<SidCpU6502Engine::RegEvent> SidCpU6502Engine::traceSidExecution(
     uint16_t playAddr, uint16_t subsong,
     uint32_t totalFrames)
 {
-    std::vector<RegEvent> events;
-    std::cout << "[SidCpU6502Engine] Start tracing, initial events size=" << events.size() << "\n";
+    TraceOptions o;
+    o.maxSeconds = 4.0;
+    return traceSidExecutionEx (codeData, codeSize, loadAddr, initAddrIn, playAddr, subsong, totalFrames, o).events;
+}
+
+SidCpU6502Engine::TraceResult SidCpU6502Engine::traceSidExecutionEx(
+    const uint8_t* codeData, size_t codeSize,
+    uint16_t loadAddr, uint16_t initAddrIn,
+    uint16_t playAddr, uint16_t subsong,
+    uint32_t totalFrames, const TraceOptions& options)
+{
+    TraceResult result;
+    std::vector<RegEvent>& events = result.events;
     SidCpu6502 cpu;
 
     for (size_t i = 0; i < codeSize && (loadAddr + i) < 65536; ++i)
@@ -579,6 +588,7 @@ std::vector<SidCpU6502Engine::RegEvent> SidCpU6502Engine::traceSidExecution(
     uint16_t rasterLine = 0;
 
     uint16_t ciaTimerALatch = 0xFFFF;
+    bool     ciaLatchWritten = false;
     uint16_t ciaTimerACounter = 0xFFFF;
     bool     ciaTimerARunning = false;
     bool     ciaTimerAContinuous = true;
@@ -706,9 +716,15 @@ std::vector<SidCpU6502Engine::RegEvent> SidCpU6502Engine::traceSidExecution(
 
         // CIA1 Timer A: Latch-Bytes
         if (addr == 0xDC04)
+        {
             ciaTimerALatch = (ciaTimerALatch & 0xFF00) | val;
+            ciaLatchWritten = true;
+        }
         else if (addr == 0xDC05)
+        {
             ciaTimerALatch = (ciaTimerALatch & 0x00FF) | (static_cast<uint16_t>(val) << 8);
+            ciaLatchWritten = true;
+        }
         // CIA1 Control Register A: bit0 = Start/Stop, bit3 = One-Shot, bit4 = Force Load
         else if (addr == 0xDC0E)
         {
@@ -862,10 +878,24 @@ std::vector<SidCpU6502Engine::RegEvent> SidCpU6502Engine::traceSidExecution(
         playIsInterruptDriven = false;
     }
 
-    std::cout << "[SID] Init beendet. Verwende Play-Adresse: 0x" << std::hex << effectivePlayAddr << std::dec << "\n";
+
+    {
+        const double clockHz = options.ntsc ? 1022727.0 : 985248.0;
+        const double videoHz = options.ntsc ? 59.8261 : 50.1245;
+        if (options.ciaSpeed)
+        {
+            const double latch = ciaLatchWritten ? (ciaTimerALatch == 0 ? 65536.0 : (double) ciaTimerALatch) : (options.ntsc ? 17045.0 : 16421.0);
+            result.framesPerSecond = clockHz / std::max (1.0, latch);
+        }
+        else
+            result.framesPerSecond = videoHz;
+    }
 
     if (effectivePlayAddr == 0)
-        return events;
+    {
+        result.noPlay = true;
+        return result;
+    }
 
     uint16_t dummyReturn = (uint16_t)(trampolineBase + 1);
     cpu.ram[dummyReturn] = playIsInterruptDriven ? 0x40 : 0x60; // RTI für simulierte Hardware-Interrupts, sonst RTS für direkten Unterprogrammaufruf
@@ -876,8 +906,16 @@ std::vector<SidCpU6502Engine::RegEvent> SidCpU6502Engine::traceSidExecution(
     {
         auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - startTime).count();
-        if (elapsedMs > 4000)
+        if ((double) elapsedMs > options.maxSeconds * 1000.0)
+        {
+            result.timedOut = true;
             break;
+        }
+        if (options.cancel && (currentFrame & 15) == 0 && options.cancel())
+        {
+            result.cancelled = true;
+            break;
+        }
 
         uint8_t frameSP = cpu.regSP;
 
@@ -957,6 +995,6 @@ std::vector<SidCpU6502Engine::RegEvent> SidCpU6502Engine::traceSidExecution(
         cpu.regSP = frameSP;
     }
 
-    std::cout << "[SidCpU6502Engine] Finished. Total collected events: " << events.size() << "\n";
-    return events;
+    result.frames = currentFrame;
+    return result;
 }

@@ -1,105 +1,73 @@
-/*
-  ==============================================================================
+// SIDiMIDI – application, main window and the scale host (stepless scaling of the whole user interface).
+#include <juce_gui_basics/juce_gui_basics.h>
+#include "ScaleHost.h"
 
-    This file contains the basic startup code for a JUCE application.
+using namespace sm;
 
-  ==============================================================================
-*/
-
-#include <JuceHeader.h>
-#include "MainComponent.h"
-
-//==============================================================================
-class SIDIMIDIApplication  : public juce::JUCEApplication
+namespace
+{
+class MainWindow : public juce::DocumentWindow
 {
 public:
-    //==============================================================================
-    SIDIMIDIApplication() {}
-
-    const juce::String getApplicationName() override       { return ProjectInfo::projectName; }
-    const juce::String getApplicationVersion() override    { return ProjectInfo::versionString; }
-    bool moreThanOneInstanceAllowed() override             { return true; }
-
-    //==============================================================================
-    void initialise (const juce::String& commandLine) override
+    explicit MainWindow (const juce::String& name)
+        : DocumentWindow (name, juce::Colour (0xff131033), DocumentWindow::allButtons)
     {
-        // This method is where you should put your application's initialisation code..
-
-        mainWindow.reset (new MainWindow (getApplicationName()));
-    }
-
-    void shutdown() override
-    {
-        // Add your application's shutdown code here..
-
-        mainWindow = nullptr; // (deletes our window)
-    }
-
-    //==============================================================================
-    void systemRequestedQuit() override
-    {
-        // This is called when the app is being asked to quit: you can ignore this
-        // request and let the app carry on running, or call quit() to allow the app to close.
-        quit();
-    }
-
-    void anotherInstanceStarted (const juce::String& commandLine) override
-    {
-        // When another instance of the app is launched while this one is running,
-        // this method is invoked, and the commandLine parameter tells you what
-        // the other instance's command-line arguments were.
-    }
-
-    //==============================================================================
-    /*
-        This class implements the desktop window that contains an instance of
-        our MainComponent class.
-    */
-    class MainWindow    : public juce::DocumentWindow
-    {
-    public:
-        MainWindow (juce::String name)
-            : DocumentWindow (name,
-                              juce::Desktop::getInstance().getDefaultLookAndFeel()
-                                                          .findColour (juce::ResizableWindow::backgroundColourId),
-                              DocumentWindow::allButtons)
+        setUsingNativeTitleBar (true);
+        host = new ScaleHost();
+        setContentOwned (host, false);
+        auto& st = host->main().archive().settings;
+        setResizable (true, true);
+        setResizeLimits (640, 400, 7680, 4320);
+        const int w = st.getProperty ("w", 1440), h = st.getProperty ("h", 880);
+        const int x = st.getProperty ("x", -1), y = st.getProperty ("y", -1);
+        centreWithSize (juce::jlimit (640, 7680, w), juce::jlimit (400, 4320, h));
+        if (x >= 0 && y >= 0)
         {
-            setUsingNativeTitleBar (true);
-            setContentOwned (new MainComponent(), true);
-
-           #if JUCE_IOS || JUCE_ANDROID
-            setFullScreen (true);
-           #else
-            setResizable (true, true);
-            centreWithSize (getWidth(), getHeight());
-           #endif
-
-            setVisible (true);
+            const auto area = juce::Desktop::getInstance().getDisplays().getTotalBounds (true);
+            const juce::Rectangle<int> r (x, y, getWidth(), getHeight());
+            if (area.intersects (r)) setTopLeftPosition (x, y);
         }
+        if ((bool) st.getProperty ("max", false)) setFullScreen (true);
+        setVisible (true);
+    }
 
-        void closeButtonPressed() override
+    ~MainWindow() override { saveBounds(); }
+
+    void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
+
+    void saveBounds()
+    {
+        if (host == nullptr) return;
+        auto& st = host->main().archive().settings;
+        st.setProperty ("max", isFullScreen(), nullptr);
+        if (! isFullScreen())
         {
-            // This is called when the user tries to close this window. Here, we'll just
-            // ask the app to quit when this happens, but you can change this to do
-            // whatever you need.
-            JUCEApplication::getInstance()->systemRequestedQuit();
+            st.setProperty ("w", getWidth(), nullptr);
+            st.setProperty ("h", getHeight(), nullptr);
+            st.setProperty ("x", getX(), nullptr);
+            st.setProperty ("y", getY(), nullptr);
         }
-
-        /* Note: Be careful if you override any DocumentWindow methods - the base
-           class uses a lot of them, so by overriding you might break its functionality.
-           It's best to do all your work in your content component instead, but if
-           you really have to override any DocumentWindow methods, make sure your
-           subclass also calls the superclass's method.
-        */
-
-    private:
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
-    };
+        host->main().archive().settingsChanged();
+    }
 
 private:
-    std::unique_ptr<MainWindow> mainWindow;
+    ScaleHost* host = nullptr;
+};
+} // namespace
+
+class SidimidiApplication : public juce::JUCEApplication
+{
+public:
+    const juce::String getApplicationName() override { return "SIDiMIDI"; }
+    const juce::String getApplicationVersion() override { return SM_VERSION_STRING; }
+    bool moreThanOneInstanceAllowed() override { return true; }
+
+    void initialise (const juce::String&) override { window = std::make_unique<MainWindow> ("SIDiMIDI"); }
+    void shutdown() override { window.reset(); }
+    void systemRequestedQuit() override { quit(); }
+
+private:
+    std::unique_ptr<MainWindow> window;
 };
 
-//==============================================================================
-// This macro generates the main() routine that launches the app.
-START_JUCE_APPLICATION (SIDIMIDIApplication)
+START_JUCE_APPLICATION (SidimidiApplication)

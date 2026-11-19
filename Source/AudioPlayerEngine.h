@@ -70,7 +70,7 @@ public:
             if (isSidPlaying)
             {
                 samplesSinceLastFrame++;
-                double samplesPerFrame = currentSampleRate / 50.125;
+                double samplesPerFrame = currentSampleRate / framesPerSecond;
 
                 if (samplesSinceLastFrame >= samplesPerFrame)
                 {
@@ -150,6 +150,50 @@ public:
         }
         return true;
     }
+
+    //==============================================================================
+    // Plays a precomputed trace (SidTrace) starting at startFrame. The tune ends after totalFrames.
+    bool playTrace(const std::vector<SidCpU6502Engine::RegEvent>& events, double fps, uint32_t totalFrames, uint32_t startFrame = 0, bool ntsc = false)
+    {
+        stop();
+        if (events.empty()) return false;
+        const juce::ScopedLock sl(lock);
+        traceEvents = events;
+        sidClockHz = ntsc ? 1022727.0f : 985248.0f;
+        framesPerSecond = juce::jlimit(10.0, 400.0, fps);
+        traceTotalFrames = juce::jmax(1u, totalFrames);
+        sidFinished = false;
+        isSidPlaying = true;
+        isMidiPlaying = false;
+        seekLocked(startFrame);
+        return true;
+    }
+
+    // Jumps to a frame of the running (or paused) SID tune: the chip state is rebuilt from the register writes.
+    void seekFrame(uint32_t frame)
+    {
+        const juce::ScopedLock sl(lock);
+        if (traceTotalFrames == 0) return;
+        seekLocked(frame);
+    }
+
+    void setVoiceMuted(int voice, bool muted)
+    {
+        if (voice < 0 || voice > 2) return;
+        int m = voiceMuteMask.load();
+        m = muted ? (m | (1 << voice)) : (m & ~(1 << voice));
+        voiceMuteMask = m;
+    }
+    void setOutputGain(float gain) { outputGain = juce::jlimit(0.0f, 2.0f, gain); }
+
+    uint32_t getPlayFrame() const { const juce::ScopedLock sl(lock); return (uint32_t) currentFrameCounter; }
+    double   getFramesPerSecond() const { const juce::ScopedLock sl(lock); return framesPerSecond; }
+    bool     isSidTunePlaying() const { const juce::ScopedLock sl(lock); return isSidPlaying; }
+    // true once after a tune played to its end (then reset)
+    bool     takeSidFinished() { const juce::ScopedLock sl(lock); const bool f = sidFinished; sidFinished = false; return f; }
+    // pause/resume of a SID tune started with playTrace()
+    void     setSidPaused(bool paused) { const juce::ScopedLock sl(lock); if (traceTotalFrames > 0) isSidPlaying = ! paused; }
+    bool     hasSidTrace() const { const juce::ScopedLock sl(lock); return traceTotalFrames > 0 && ! traceEvents.empty(); }
 
     bool playMidiFile(const juce::File& midiFile, juce::String* log = nullptr)
     {
@@ -436,6 +480,8 @@ public:
         currentEventIndex = 0;
         currentFrameCounter = 0;
         traceEvents.clear();
+        traceTotalFrames = 0;
+        framesPerSecond = 50.125;
 
         midiEvents.clear();
         midiEventIndex = 0;
@@ -581,6 +627,26 @@ private:
         juce::MidiMessage message;
     };
 
+    void seekLocked(uint32_t frame)
+    {
+        chip = SidChipState{};
+        for (int i = 0; i < 3; ++i)
+        {
+            runtime[i] = VoiceRuntime{};
+            oscHistory[i].fill(0.0f);
+            oscHistoryPos[i] = 0;
+        }
+        filter.reset();
+        currentEventIndex = 0;
+        while (currentEventIndex < traceEvents.size() && traceEvents[currentEventIndex].frameIndex <= frame)
+        {
+            chip.applyRegisterEvent(traceEvents[currentEventIndex].reg, traceEvents[currentEventIndex].value);
+            ++currentEventIndex;
+        }
+        currentFrameCounter = frame;
+        samplesSinceLastFrame = 0;
+    }
+
     //==============================================================================
     void processNextSidFrame()
     {
@@ -593,7 +659,16 @@ private:
             currentEventIndex++;
         }
 
-        if (currentEventIndex >= traceEvents.size())
+        if (traceTotalFrames > 0)
+        {
+            // a precomputed trace (playTrace): the tune ends at its known length
+            if ((uint32_t) currentFrameCounter >= traceTotalFrames)
+            {
+                isSidPlaying = false;
+                sidFinished = true;
+            }
+        }
+        else if (currentEventIndex >= traceEvents.size())
         {
             currentEventIndex = 0;
             currentFrameCounter = 0;
@@ -674,7 +749,7 @@ private:
 
     float voiceFrequencyHz(int v) const
     {
-        return chip.voices[v].frequency * (985248.0f / 16777216.0f);
+        return chip.voices[v].frequency * (sidClockHz / 16777216.0f);
     }
 
     void updateEnvelope(VoiceRuntime& rt, const SIDVoiceData& voice)
@@ -846,6 +921,10 @@ private:
         // 5) Voice 3 auf echter Hardware stummschalten, wenn $D418 Bit7 gesetzt ist.
         if (chip.voice3Disconnected)
             voiceOut[2] = 0.0f;
+        // Nutzer-Stummschaltung einzelner Stimmen (Klick auf den Stimmennamen in der Darstellung)
+        for (int i = 0; i < 3; ++i)
+            if ((voiceMuteMask.load() >> i) & 1)
+                voiceOut[i] = 0.0f;
 
         for (int i = 0; i < 3; ++i)
             runtime[i].prevWrapped = wrappedThisSample[i];
@@ -860,7 +939,7 @@ private:
 
         float filtered = applyFilter(routedSum);
         float masterVol = chip.masterVolumeNibble / 15.0f;
-        float output = (filtered + bypassSum) * masterVol * 0.3f;
+        float output = (filtered + bypassSum) * masterVol * 0.3f * outputGain.load();
 
         return juce::jlimit(-1.0f, 1.0f, output);
     }
@@ -876,6 +955,12 @@ private:
     std::vector<SidCpU6502Engine::RegEvent> traceEvents;
     size_t   currentEventIndex = 0;
     int64_t  currentFrameCounter = 0;
+    double   framesPerSecond = 50.125;   // play routine calls per second of the current tune
+    float    sidClockHz = 985248.0f;     // PAL or NTSC system clock (pitch of the SID oscillators)
+    std::atomic<int>   voiceMuteMask { 0 };   // bit n = voice n+1 muted
+    std::atomic<float> outputGain { 1.0f };   // user volume
+    uint32_t traceTotalFrames = 0;       // > 0: tune from playTrace(), ends after this many frames
+    bool     sidFinished = false;
     double   currentSampleRate = 44100.0;
     double   samplesSinceLastFrame = 0;
 

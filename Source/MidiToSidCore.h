@@ -582,10 +582,29 @@ private:
         s << "                dc.b 0,SUBTUNES\n";
         s << "                dc.b 0,1\n";
         s << "                dc.b 0,0,0,0\n\n";
+        // Titel/Autor/Veroeffentlicht: je 32 Bytes ASCII, mit Nullen aufgefuellt (DASM fuellt
+        // Luecken sonst mit $FF - das zeigte sich in SID-Playern als "ÿÿÿ" hinter dem Titel).
+        auto field = [](const juce::String& text)
+        {
+            juce::String ascii;
+            for (auto c : text)
+            {
+                if (c >= 32 && c < 127 && c != '"') ascii << juce::String::charToString(c);
+                else if (c == 0xe4 || c == 0xc4) ascii << "a";
+                else if (c == 0xf6 || c == 0xd6) ascii << "o";
+                else if (c == 0xfc || c == 0xdc) ascii << "u";
+                else if (c == 0xdf) ascii << "s";
+                else ascii << "_";
+            }
+            ascii = ascii.substring(0, 31);
+            return "                dc.b \"" + ascii + "\"\n                ds.b " + juce::String(32 - ascii.length()) + ",0\n";
+        };
         s << "                org $0016\n";
-        s << "                dc.b " << asDasmString(title.substring(0, 31)) << "\n\n";
-        s << "                org $0036\n";
-        s << "                dc.b " << asDasmString("SIDIMIDI MIDI-zu-SID") << "\n\n";
+        s << field(title);
+        s << field("SIDiMIDI (MIDI to SID)");
+        s << field(juce::String(juce::Time::getCurrentTime().getYear()) + " SIDiMIDI");
+        s << "                dc.b 0,4\n";          // Flags: PAL
+        s << "                dc.b 0,0,0,0\n";      // startPage, pageLength, 2./3. SID
         s << "                org $007c\n";
         s << "                dc.b $00,$10\n";
         s << "                rorg $1000\n\n";
