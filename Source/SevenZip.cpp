@@ -1,4 +1,5 @@
 #include "SevenZip.h"
+#include "Ppmd7.h"
 #include <array>
 #include <cstring>
 #include <memory>
@@ -369,7 +370,7 @@ enum : juce::uint8 { kEnd = 0, kHeader = 1, kArchiveProperties = 2, kAdditionalS
                      kNumUnPackStream = 13, kEmptyStream = 14, kEmptyFile = 15, kAnti = 16, kNames = 17, kCTime = 18, kATime = 19,
                      kMTime = 20, kWinAttributes = 21, kComment = 22, kEncodedHeader = 23, kStartPos = 24, kDummy = 25 };
 
-enum : juce::uint64 { mCopy = 0x00, mDelta = 0x03, mBcjOld = 0x04, mLzma2 = 0x21, mLzma = 0x030101, mBcj = 0x03030103 };
+enum : juce::uint64 { mCopy = 0x00, mDelta = 0x03, mBcjOld = 0x04, mLzma2 = 0x21, mLzma = 0x030101, mPpmd = 0x030401, mBcj = 0x03030103, mBcj2 = 0x0303011B };
 
 struct Coder { juce::uint64 method = 0; int numIn = 1, numOut = 1; std::vector<juce::uint8> props; };
 struct Bind { int inIndex = 0, outIndex = 0; };
@@ -705,13 +706,126 @@ bool decodeCoderToSink (const Archive& a, const Folder& f, const Coder& c, const
         }
         return d.flush();
     }
+    if (c.method == mPpmd)
+    {
+        if (c.props.size() < 5) { error = "PPMd-Eigenschaften fehlen"; return false; }
+        const juce::uint32 mem = (juce::uint32) c.props[1] | ((juce::uint32) c.props[2] << 8) | ((juce::uint32) c.props[3] << 16) | ((juce::uint32) c.props[4] << 24);
+        return ppmd7Decode (in, inSize, c.props[0], mem, outSize, sink, error);
+    }
     error = "Nicht unterstützte Komprimierung (Methode " + juce::String::toHexString ((juce::int64) c.method) + ")";
     (void) a; (void) f;
     return false;
 }
 
+// BCJ2 (x86 branch converter with 4 input streams: main, call, jump, range-coded flags)
+bool bcj2Decode (const std::vector<juce::uint8>& main, const std::vector<juce::uint8>& call, const std::vector<juce::uint8>& jump,
+                 const std::vector<juce::uint8>& rcData, std::vector<juce::uint8>& out, size_t outSize)
+{
+    juce::uint16 prob[256 + 2];
+    for (auto& p : prob) p = 1 << 10;
+    size_t inPos = 0, callPos = 0, jumpPos = 0, rcPos = 0, outPos = 0;
+    juce::uint32 range = 0xFFFFFFFFu, code = 0;
+    juce::uint8 prev = 0;
+    out.assign (outSize, 0);
+    for (int i = 0; i < 5; ++i) { if (rcPos >= rcData.size()) return false; code = (code << 8) | rcData[rcPos++]; }
+    if (outSize == 0) return true;
+    auto isJ = [] (juce::uint8 b0, juce::uint8 b1) { return (b1 & 0xFE) == 0xE8 || (b0 == 0x0F && (b1 & 0xF0) == 0x80); };
+    for (;;)
+    {
+        size_t limit = main.size() - inPos;
+        if (outSize - outPos < limit) limit = outSize - outPos;
+        while (limit != 0)
+        {
+            const juce::uint8 b = main[inPos];
+            out[outPos++] = b;
+            if (isJ (prev, b)) break;
+            ++inPos;
+            prev = b;
+            --limit;
+        }
+        if (limit == 0 || outPos == outSize) break;
+        const juce::uint8 b = main[inPos++];
+        juce::uint16* p = b == 0xE8 ? prob + prev : b == 0xE9 ? prob + 256 : prob + 257;
+        const juce::uint32 ttt = *p;
+        const juce::uint32 bound = (range >> 11) * ttt;
+        bool one;
+        if (code < bound) { range = bound; *p = (juce::uint16) (ttt + ((2048 - ttt) >> 5)); one = false; }
+        else { range -= bound; code -= bound; *p = (juce::uint16) (ttt - (ttt >> 5)); one = true; }
+        if (range < (1u << 24)) { if (rcPos >= rcData.size()) return false; range <<= 8; code = (code << 8) | rcData[rcPos++]; }
+        if (! one) { prev = b; continue; }
+        const juce::uint8* v;
+        if (b == 0xE8) { if (callPos + 4 > call.size()) return false; v = call.data() + callPos; callPos += 4; }
+        else { if (jumpPos + 4 > jump.size()) return false; v = jump.data() + jumpPos; jumpPos += 4; }
+        const juce::uint32 dest = (((juce::uint32) v[0] << 24) | ((juce::uint32) v[1] << 16) | ((juce::uint32) v[2] << 8) | v[3]) - ((juce::uint32) outPos + 4);
+        out[outPos++] = (juce::uint8) dest;
+        if (outPos == outSize) break;
+        out[outPos++] = (juce::uint8) (dest >> 8);
+        if (outPos == outSize) break;
+        out[outPos++] = (juce::uint8) (dest >> 16);
+        if (outPos == outSize) break;
+        out[outPos++] = prev = (juce::uint8) (dest >> 24);
+    }
+    return outPos == outSize;
+}
+
+// decodes one out-stream of a folder into memory (general coder graph; used for folders with BCJ2)
+bool decodeOutStream (const Archive& a, const Folder& f, int outIdx, std::vector<juce::uint8>& out, juce::String& error, int depth = 0)
+{
+    if (depth > 8) { error = "Nicht unterstützte Filterkette"; return false; }
+    int coderIdx = -1, inBase = 0, outBase = 0;
+    for (size_t i = 0; i < f.coders.size(); ++i)
+    {
+        if (outIdx < outBase + f.coders[i].numOut) { coderIdx = (int) i; break; }
+        inBase += f.coders[i].numIn;
+        outBase += f.coders[i].numOut;
+    }
+    if (coderIdx < 0) { error = "Archiv fehlerhaft"; return false; }
+    const auto& c = f.coders[(size_t) coderIdx];
+    auto getIn = [&] (int k, std::vector<juce::uint8>& buf) -> bool
+    {
+        const int inIdx = inBase + k;
+        for (auto& b : f.binds)
+            if (b.inIndex == inIdx) return decodeOutStream (a, f, b.outIndex, buf, error, depth + 1);
+        for (size_t pi = 0; pi < f.packed.size(); ++pi)
+            if (f.packed[pi] == inIdx)
+            {
+                const juce::uint8* p; size_t n;
+                if (! a.pack (f, (int) pi, p, n)) { error = "Archiv abgeschnitten"; return false; }
+                buf.assign (p, p + n);
+                return true;
+            }
+        error = "Archiv fehlerhaft";
+        return false;
+    };
+    const auto outSize = f.unpackSizes[(size_t) outIdx];
+    if (c.method == mBcj2)
+    {
+        std::vector<juce::uint8> in0, in1, in2, in3;
+        if (c.numIn != 4 || ! getIn (0, in0) || ! getIn (1, in1) || ! getIn (2, in2) || ! getIn (3, in3)) { if (error.isEmpty()) error = "BCJ2-Daten fehlerhaft"; return false; }
+        if (! bcj2Decode (in0, in1, in2, in3, out, (size_t) outSize)) { error = "BCJ2-Daten fehlerhaft"; return false; }
+        return true;
+    }
+    if (c.numIn != 1 || c.numOut != 1) { error = "Nicht unterstützte Filterkette"; return false; }
+    std::vector<juce::uint8> in;
+    if (! getIn (0, in)) return false;
+    if (c.method == mDelta) { deltaDecode (in.data(), in.size(), (c.props.empty() ? 1u : (size_t) c.props[0] + 1)); out = std::move (in); return true; }
+    if (c.method == mBcj || c.method == mBcjOld) { bcjX86Decode (in.data(), in.size()); out = std::move (in); return true; }
+    out.clear();
+    out.reserve ((size_t) outSize);
+    auto collect = [&out] (const juce::uint8* p, size_t len) { out.insert (out.end(), p, p + len); return true; };
+    return decodeCoderToSink (a, f, c, in.data(), in.size(), outSize, collect, error);
+}
+
 bool decodeFolder (const Archive& a, const Folder& f, const std::function<bool (const juce::uint8*, size_t)>& sink, juce::String& error)
 {
+    for (auto& c : f.coders)
+        if (c.method == mBcj2)
+        {
+            std::vector<juce::uint8> data;
+            const int mo = f.mainOut();
+            if (mo < 0 || ! decodeOutStream (a, f, mo, data, error)) { if (error.isEmpty()) error = "Archiv fehlerhaft"; return false; }
+            return sink (data.data(), data.size());
+        }
     if (f.coders.size() == 1)
     {
         const juce::uint8* in; size_t n;
@@ -727,7 +841,12 @@ bool decodeFolder (const Archive& a, const Folder& f, const std::function<bool (
             const auto m = f.coders[(size_t) i].method;
             if (m == mBcj || m == mBcjOld || m == mDelta) filterIdx = i;
         }
-        if (filterIdx < 0 || f.packed.size() != 1) { error = "Nicht unterstützte Filterkette"; return false; }
+        if (filterIdx < 0 || f.packed.size() != 1)
+        {
+            error = "Nicht unterstützte Filterkette (" + juce::String::toHexString ((juce::int64) f.coders[0].method) + " + " + juce::String::toHexString ((juce::int64) f.coders[1].method)
+                    + ", " + juce::String ((int) f.packed.size()) + " Pack-Streams)";
+            return false;
+        }
         const int compIdx = 1 - filterIdx;
         const juce::uint8* in; size_t n;
         if (! a.pack (f, 0, in, n)) { error = "Archiv abgeschnitten"; return false; }
@@ -742,7 +861,9 @@ bool decodeFolder (const Archive& a, const Folder& f, const std::function<bool (
         else bcjX86Decode (buf.data(), buf.size());
         return sink (buf.data(), buf.size());
     }
-    error = "Nicht unterstützte Filterkette";
+    error = "Nicht unterstützte Filterkette (" + juce::String ((int) f.coders.size()) + " Coder:";
+    for (auto& c : f.coders) error << " " << juce::String::toHexString ((juce::int64) c.method);
+    error << ")";
     return false;
 }
 
@@ -964,7 +1085,7 @@ bool extractImpl (const juce::File& file, const juce::File& destDir, const std::
         if (abort) return false;
         if (! ok)
         {
-            if (skipped != nullptr && decodeError.startsWith ("Nicht unterstützt"))
+            if (skipped != nullptr && decodeError.startsWith ("Nicht unterst"))
             {
                 out.reset();
                 for (int m : members) skipped->add (a.entries[(size_t) m].path);

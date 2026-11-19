@@ -15,6 +15,7 @@ set(SM_CORE
     Source/SidCpu6502Engine.cpp
     Source/SidTrace.cpp
     Source/SevenZip.cpp
+    Source/Ppmd7.cpp
     Source/HvscUpdate.cpp)
 
 set(SM_DEFS

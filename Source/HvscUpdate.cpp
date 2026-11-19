@@ -46,13 +46,47 @@ bool safeRelative (const juce::String& p)
 
 juce::File fileOf (const juce::File& root, const juce::String& rel) { return root.getChildFile (rel.substring (1)); }
 
+// network drives (NAS shares) sometimes refuse a directory or file operation once ("path not found"), so retry
+bool createDirRetry (const juce::File& dir)
+{
+    for (int attempt = 0; attempt < 8; ++attempt)
+    {
+        if (attempt > 0) juce::Thread::sleep (200 * attempt);
+        if (dir.isDirectory() || dir.createDirectory().wasOk()) return true;
+    }
+    return dir.isDirectory();
+}
+
+bool copyWithRetry (const juce::File& src, const juce::File& dst)
+{
+    for (int attempt = 0; attempt < 8; ++attempt)
+    {
+        if (attempt > 0) juce::Thread::sleep (250 * attempt);
+        if (! createDirRetry (dst.getParentDirectory())) continue;
+        if (src.copyFileTo (dst)) return true;
+        if (dst.existsAsFile() && dst.getSize() == src.getSize()) return true;
+        juce::FileInputStream in (src);                                  // second way: plain stream copy
+        if (in.openedOk())
+        {
+            dst.deleteFile();
+            juce::FileOutputStream out (dst);
+            if (out.openedOk())
+            {
+                out.writeFromInputStream (in, -1);
+                out.flush();
+                if (out.getStatus().wasOk() && dst.getSize() == src.getSize()) return true;
+            }
+        }
+    }
+    return false;
+}
+
 void backup (const juce::File& root, const juce::File& file, const juce::File& backupDir)
 {
     const auto rel = file.getRelativePathFrom (root);
     const auto target = backupDir.getChildFile (rel);
     if (target.existsAsFile() || ! file.existsAsFile()) return;
-    target.getParentDirectory().createDirectory();
-    if (! file.copyFileTo (target)) { juce::Thread::sleep (200); file.copyFileTo (target); }
+    copyWithRetry (file, target);
 }
 
 bool dirHasFiles (const juce::File& dir)
@@ -74,9 +108,11 @@ int moveInto (const juce::File& src, const juce::File& dst, const juce::File& ro
         return n;
     }
     if (dst.existsAsFile()) { backup (root, dst, backupDir); dst.deleteFile(); }
-    dst.getParentDirectory().createDirectory();
-    if (src.moveFileTo (dst)) ++n;
-    else { ++r.errors; r.messages.add ("Verschieben fehlgeschlagen: " + src.getFullPathName()); }
+    createDirRetry (dst.getParentDirectory());
+    if (src.moveFileTo (dst)) { ++n; return n; }
+    if (copyWithRetry (src, dst)) { src.deleteFile(); ++n; return n; }
+    ++r.errors;
+    r.messages.add ("Verschieben fehlgeschlagen: " + src.getFullPathName() + " -> " + dst.getFullPathName());
     return n;
 }
 
@@ -208,7 +244,7 @@ std::vector<HvscOp> parseHvscScript (const juce::String& text, juce::StringArray
 
 // ================================================================================================ apply
 bool applyHvscScript (const juce::File& root, const std::vector<HvscOp>& ops, const juce::File& backupDir, HvscApplyResult& r,
-                      const std::function<bool (int, int)>& progress)
+                      const std::function<bool (int, int)>& progress, const juce::File& stagingTop)
 {
     const int total = (int) ops.size();
     int done = 0;
@@ -217,7 +253,9 @@ bool applyHvscScript (const juce::File& root, const std::vector<HvscOp>& ops, co
         if (progress && (done % 64) == 0 && ! progress (done, total)) { r.messages.add ("Abgebrochen"); return false; }
         ++done;
         if (! safeRelative (op.path)) { ++r.errors; r.messages.add ("Unsicherer Pfad: " + op.path); continue; }
-        const auto target = fileOf (root, op.path);
+        // "/update/..." lives in the local staging folder when one is given (keeps thousands of temporary files off a network drive)
+        const bool staged = stagingTop != juce::File() && (op.path == "/update" || op.path.startsWith ("/update/"));
+        const auto target = staged ? stagingTop.getChildFile (op.path.substring (8)) : fileOf (root, op.path);
         switch (op.type)
         {
             case HvscOp::replace: case HvscOp::move:
@@ -284,18 +322,6 @@ int verifyHvscHeaders (const juce::File& root, const std::vector<HvscOp>& ops, j
 // ================================================================================================ package
 namespace
 {
-// copies a file; network drives and virus scanners sometimes refuse once, so retry a few times
-bool copyWithRetry (const juce::File& src, const juce::File& dst)
-{
-    for (int attempt = 0; attempt < 5; ++attempt)
-    {
-        if (attempt > 0) juce::Thread::sleep (150 * attempt);
-        dst.getParentDirectory().createDirectory();
-        if (src.copyFileTo (dst)) return true;
-        if (dst.existsAsFile() && dst.getSize() == src.getSize()) return true;
-    }
-    return false;
-}
 
 // folder that contains "<folder>/<script>" (searched up to two levels deep)
 juce::File findPackageRoot (const juce::File& dir, const juce::String& script, const juce::String& folder, int depth = 0)
@@ -391,7 +417,10 @@ HvscInstallResult installHvscPackage (const juce::File& root, int version, const
         ok = extractZip (packageFile, work, [&] (double f) { return report (U8("Entpacken …"), 0.05 + 0.35 * f); }, err);
     else
     {
-        ok = SevenZip::extractAll (packageFile, work, [&] (juce::uint64 d, juce::uint64 t, const juce::String&) { return report (U8("Entpacken …"), 0.05 + 0.35 * (t > 0 ? (double) d / (double) t : 0.0)); }, err);
+        juce::StringArray skippedFiles;    // e.g. update.exe (BCJ2) – programs are not needed
+        ok = SevenZip::extractAll (packageFile, work, [&] (juce::uint64 d, juce::uint64 t, const juce::String&) { return report (U8("Entpacken …"), 0.05 + 0.35 * (t > 0 ? (double) d / (double) t : 0.0)); }, err, &skippedFiles);
+        for (auto& sk : skippedFiles)
+            if (! sk.endsWithIgnoreCase (".exe")) { ok = false; err = "Nicht unterstützt: " + sk; }
         if (! ok && err != "Abgebrochen")
         {
             // methods the own reader does not know (the HVSC packages use PPMd): let the system's tar do it
@@ -414,12 +443,15 @@ HvscInstallResult installHvscPackage (const juce::File& root, int version, const
     if (pkg == juce::File()) return fail (juce::String::formatted (U8("Das Paket enthält kein Update%02d.hvs – es passt nicht zu Version %d."), version, version));
 
     // 3) copy into the collection (official layout: the "update" folder, which the script refers to as /update/...)
+    // Official layout: the package's "update" folder stays in the local temp folder (the script's /update/... sources are read from there),
+    // so no thousands of temporary files are written to the collection (which may be on a NAS). Simple layout: copied into the collection.
     const auto sourceTop = official ? pkg.getChildFile ("update") : pkg;
-    const auto destTop = official ? root.getChildFile ("update") : root;
+    const auto destTop = official ? sourceTop : root;
     const int total = std::max (1, countFiles (sourceTop));
     int done = 0;
     for (const auto& e : juce::RangedDirectoryIterator (sourceTop, true, "*", juce::File::findFiles))
     {
+        if (official) break;
         if (! report (U8("Dateien einspielen …"), 0.40 + 0.30 * ((double) done / total))) { r.cancelled = true; return fail ("Abgebrochen"); }
         ++done;
         const auto f = e.getFile();
@@ -429,15 +461,21 @@ HvscInstallResult installHvscPackage (const juce::File& root, int version, const
         if (dst.existsAsFile()) backup (root, dst, backupDir);
         dst.getParentDirectory().createDirectory();
         if (copyWithRetry (f, dst)) ++r.copiedFiles;
-        else { r.applied.errors++; r.applied.messages.add ("Kopieren fehlgeschlagen: " + dst.getFullPathName()); }
+        else
+        {
+            r.applied.errors++;
+            r.applied.messages.add ("Kopieren fehlgeschlagen: " + dst.getFullPathName() + " (Quelle " + (f.existsAsFile() ? juce::String (f.getSize()) + " Bytes" : juce::String ("fehlt"))
+                                    + ", Zielordner " + (dst.getParentDirectory().isDirectory() ? juce::String ("vorhanden") : "fehlt: " + dst.getParentDirectory().createDirectory().getErrorMessage()) + ", Ziel " + (dst.existsAsFile() ? juce::String (dst.getSize()) + " Bytes" : juce::String ("fehlt")) + ")");
+        }
     }
-    if (r.applied.errors > 0) return fail (U8("Dateien konnten nicht eingespielt werden – siehe Protokoll"));
+    if (r.applied.errors > 0) return fail (U8("Dateien konnten nicht eingespielt werden – siehe Protokoll"));   // the collection has not been touched yet
 
     // 4) run the script
     const auto scriptFile = official ? destTop.getChildFile (scriptName) : root.getChildFile ("DOCUMENTS").getChildFile (scriptName);
     const auto ops = parseHvscScript (readDocumentText (scriptFile), r.warnings);
     if (ops.empty()) return fail ("Das Update-Skript ist leer oder nicht lesbar");
-    const bool completed = applyHvscScript (root, ops, backupDir, r.applied, [&] (int d, int t) { return report (U8("Update-Skript ausführen …"), 0.70 + 0.25 * (t > 0 ? (double) d / t : 1.0)); });
+    const bool completed = applyHvscScript (root, ops, backupDir, r.applied, [&] (int d, int t) { return report (U8("Update-Skript ausführen …"), 0.70 + 0.25 * (t > 0 ? (double) d / t : 1.0)); },
+                                            official ? sourceTop : juce::File());
     if (! completed) { r.cancelled = true; return fail (U8("Abgebrochen – die Sammlung ist nur teilweise aktualisiert (Backup: ") + backupDir.getFullPathName() + ")"); }
     if (r.applied.errors > 0) return fail (U8("Einzelne Schritte sind fehlgeschlagen – siehe Protokoll (die Dokumente wurden nicht umgestellt)"));
 
@@ -458,8 +496,8 @@ HvscInstallResult installHvscPackage (const juce::File& root, int version, const
         if (! copyWithRetry (scriptFile, dstScript)) { r.applied.errors++; r.applied.messages.add ("Kopieren fehlgeschlagen: " + dstScript.getFullPathName()); }
     }
 
-    // 6) staging folder
-    if (destTop.isDirectory() && destTop != root && r.applied.errors == 0) destTop.deleteRecursively();
+    // 6) a "update" folder left in the collection by an older/aborted run is junk
+    if (! official) { const auto leftover = root.getChildFile ("update"); if (leftover.isDirectory() && r.applied.errors == 0) leftover.deleteRecursively(); }
     report ("Fertig", 1.0);
     r.ok = r.applied.errors == 0;
     if (! r.ok) r.error = U8("Einzelne Schritte sind fehlgeschlagen – siehe Protokoll");

@@ -27,7 +27,7 @@ struct HvscApplyResult
 // Applies the operations to the collection root (the folder that holds DOCUMENTS, MUSICIANS, ...).
 // Files that are overwritten, deleted or patched are copied to backupDir first (same relative path).
 bool applyHvscScript (const juce::File& root, const std::vector<HvscOp>& ops, const juce::File& backupDir, HvscApplyResult& result,
-                      const std::function<bool (int done, int total)>& progress = {});
+                      const std::function<bool (int done, int total)>& progress = {}, const juce::File& stagingTop = {});
 
 // Installs a downloaded update package (HVSC_Update_NN.7z / .zip) into the collection:
 // extract → find the package folder (the one with DOCUMENTS/UpdateNN.hvs) → copy it over the collection (overwritten files are backed up)
