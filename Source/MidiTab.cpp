@@ -18,7 +18,7 @@ struct MidiColDef { int id; const char* name; int width; bool numeric; const cha
 const MidiColDef kMidiCols[] = {
     { mPlay,    "▶",             38,  false, "MIDI-Datei vorhören (über den Windows-GM-Synth)" },
     { mName,    "Datei",         215, false, "Dateiname" },
-    { mConvert, "Konvertieren",  360, false, "Konvertierungstiefen: Schnell (automatisch), Gezielt (Spuren und Rollen wählen), Rundlauf (nur für von SIDiMIDI erzeugte MIDIs), Tracker (NewPlayer-Tune mit Akkord-Arpeggios und Schlagzeug, im Tracker bearbeitbar)" },
+    { mConvert, "Konvertieren",  360, false, "Konvertierungstiefen: Schnell (automatisch), Gezielt (Spuren und Rollen wählen), Rundlauf (nur für von SIDiMIDI erzeugte MIDIs), Tracker (Tune mit Akkord-Arpeggios und Schlagzeug, im Vibrants-Tracker bearbeitbar)" },
     { mTracks,  "Spuren",        54,  true,  "Spuren mit Noten" },
     { mNotes,   "Noten",         58,  true,  "Anzahl der Noten" },
     { mLength,  "Länge",         56,  true,  "Spieldauer" },
@@ -99,7 +99,7 @@ public:
         b2.setButtonText (T ("Gezielt …"));
         b3.setButtonText (T ("Rundlauf"));
         b4.setButtonText (T ("Tracker"));
-        b4.setTooltip (T ("Umwandlung in einen NewPlayer-Tune von JCH: Akkorde als Arpeggio, Schlagzeug mit eigenen Klängen, Puls und Hard-Restart. Der Tune öffnet sich im Tracker (dort Anhören, Bearbeiten, Export als SID oder MIDI)"));
+        b4.setTooltip (T ("Umwandlung in einen Tune des Vibrants-Trackers: Akkorde als Arpeggio, Schlagzeug mit eigenen Klängen, Puls und Hard-Restart. Der Tune öffnet sich im Tracker (dort Anhören, Bearbeiten, Export als SID oder MIDI)"));
         b1.setTooltip (T ("Automatisch: die drei notenreichsten Spuren, Klang nach GM-Programm"));
         b2.setTooltip (T ("Spuren und Rollen selbst wählen und vorhören"));
         b3.setTooltip (T ("Nur für MIDIs, die SIDiMIDI aus einer SID-Datei erzeugt hat: Spur 1–3 direkt zurückwandeln"));

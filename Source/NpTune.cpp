@@ -12,9 +12,9 @@ bool NpTune::loadPrg (const void* data, size_t size, juce::String& err)
 {
     isValid = false;
     const auto* d = (const juce::uint8*) data;
-    if (size < 0x300) { err = juce::String::fromUTF8 ("Die Datei ist zu klein für einen NewPlayer-Tune"); return false; }
+    if (size < 0x300) { err = juce::String::fromUTF8 ("Die Datei ist zu klein für einen Tune des Vibrants-Trackers"); return false; }
     const int la = d[0] | (d[1] << 8);
-    if (la != 0x0f00) { err = juce::String::fromUTF8 ("Kein NewPlayer-Tune (Ladeadresse $") + juce::String::toHexString (la).toUpperCase() + juce::String::fromUTF8 (" statt $0F00)"); return false; }
+    if (la != 0x0f00) { err = juce::String::fromUTF8 ("Kein Tune des Vibrants-Trackers (Ladeadresse $") + juce::String::toHexString (la).toUpperCase() + juce::String::fromUTF8 (" statt $0F00)"); return false; }
     if (size - 2 > 0xa000) { err = juce::String::fromUTF8 ("Die Datei ist zu groß"); return false; }
     mem.fill (0);
     std::memcpy (mem.data() + la, d + 2, size - 2);
@@ -24,9 +24,9 @@ bool NpTune::loadPrg (const void* data, size_t size, juce::String& err)
     for (int zp : { zpInstr, zpV1, zpV2, zpV3, zpLoByt, zpHiByt, zpSlide, zpArp1, zpArp2, zpFilter, zpPulse, zpTpoin })
     {
         const int p = pointer (zp);
-        if (p < 0x1000 || p >= endA + 0x4000) { err = juce::String::fromUTF8 ("Die Zeigertabelle des Players ist nicht gültig – das ist keine Datei des NewPlayer-Editors"); return false; }
+        if (p < 0x1000 || p >= endA + 0x4000) { err = juce::String::fromUTF8 ("Die Zeigertabelle ist nicht gültig – das ist keine Datei des Editors von JCH"); return false; }
     }
-    if (mem[0x1000] == 0 && mem[0x1001] == 0) { err = juce::String::fromUTF8 ("Der Player fehlt"); return false; }
+    if (mem[0x1000] == 0 && mem[0x1001] == 0) { err = juce::String::fromUTF8 ("Die Klangroutine fehlt"); return false; }
     isValid = true;
     return true;
 }

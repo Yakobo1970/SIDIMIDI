@@ -215,8 +215,8 @@ void SidTab::applyLanguage()
     clearFilters.setButtonText (T ("Filter löschen"));
     zoomReset.setButtonText (T ("Ganz sehen"));
     onlyFav.setButtonText (juce::String::fromUTF8 ("♥"));
-    trackerBtn.setButtonText (T ("Tracker"));
-    trackerBtn.setTooltip (T ("Tracker-Fenster: Tunes im Stil des JCH-NewPlayer-Editors komponieren, laden und als SID oder MIDI ausgeben"));
+    trackerBtn.setButtonText (T ("Vibrants-Tracker"));
+    trackerBtn.setTooltip (T ("Vibrants-Tracker: Tunes im Stil des Editors von Jens-Christian Huus (Vibrants) komponieren, laden und als SID oder MIDI speichern"));
     songLabel.setText (T ("Song:"), juce::dontSendNotification);
     search.setTextToShowWhenEmpty (T ("Suche in Titel, Autor, Komponist, Pfad …"), juce::Colours::grey);
     folders.setTooltip (T ("SID-Ordner hinzufügen, entfernen oder schreibschützen (Ordner lassen sich auch ins Fenster ziehen)"));
@@ -287,7 +287,7 @@ void SidTab::resized()
     folders.setBounds (h.removeFromLeft (76)); h.removeFromLeft (6);
     scan.setBounds (h.removeFromLeft (92)); h.removeFromLeft (6);
     h.removeFromLeft (8);
-    trackerBtn.setBounds (h.removeFromRight (86)); h.removeFromRight (6);
+    trackerBtn.setBounds (h.removeFromRight (128)); h.removeFromRight (6);
     onlyFav.setBounds (h.removeFromRight (34)); h.removeFromRight (6);
     ratingBtn.setBounds (h.removeFromRight (44)); h.removeFromRight (6);
     filterBtn.setBounds (h.removeFromRight (62)); h.removeFromRight (8);

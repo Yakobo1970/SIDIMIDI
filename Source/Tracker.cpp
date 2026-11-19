@@ -94,7 +94,7 @@ TableInfo tableInfo (NpTune::Table t, int ver)
             else
             {
                 ti.cols = { "A", "B", "C", "D", "E", "F", "G", "H" };
-                ti.help = { T ("Attack / Decay"), T ("Sustain / Release"), T ("Je nach Player-Version (siehe die Anleitung von JCH)"), "", "", "", "", T ("meist: Zeiger in die Arpeggio-Tabelle") };
+                ti.help = { T ("Attack / Decay"), T ("Sustain / Release"), T ("Je nach Variante (siehe die Anleitung von JCH)"), "", "", "", "", T ("meist: Zeiger in die Arpeggio-Tabelle") };
             }
             break;
         case NpTune::tabArpeggio:
@@ -201,7 +201,7 @@ public:
     GridView* grid = nullptr;
 
 private:
-    juce::TextButton tabButtons[5], voiceMute[3], newBtn, openBtn, d64Btn, saveBtn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, cursorBtn, stopBtn,
+    juce::TextButton tabButtons[5], voiceMute[3], newBtn, openBtn, d64Btn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, cursorBtn, stopBtn,
                      octMinus, octPlus, spdMinus, spdPlus;
     juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel;
     std::unique_ptr<PatternView> patternPtr;
@@ -817,6 +817,8 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
 }
 
 // ================================================================================================ the panel
+static juce::String titleBase() { return T ("Vibrants-Tracker") + " " SM_VERSION_STRING; }
+
 const Theme& TrackerPanel::theme() const { return main.theme(); }
 
 TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), window (w)
@@ -839,14 +841,13 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     tabButtons[0].setToggleState (true, juce::dontSendNotification);
     struct B { juce::TextButton* b; const char* text; std::function<void()> fn; const char* tip; };
     const B list[] = {
-        { &newBtn, "Neu", [this] { confirmDiscard ([this] { newTune(); }); }, "Neuer Tune mit dem Player v20.G4 (Strg + N)" },
-        { &openBtn, "Öffnen …", [this] { confirmDiscard ([this] { openFile(); }); }, "Einen Tune des NewPlayer-Editors laden (Strg + O)" },
-        { &midiInBtn, "Von MIDI …", [this] { confirmDiscard ([this] { chooseMidi(); }); }, "Eine MIDI-Datei in einen NewPlayer-Tune umwandeln: Akkorde werden Arpeggios, Schlagzeug bekommt eigene Instrumente" },
+        { &newBtn, "Neu", [this] { confirmDiscard ([this] { newTune(); }); }, "Neuer Tune mit der Variante 20.G4 (Strg + N)" },
+        { &openBtn, "Öffnen (.np)", [this] { confirmDiscard ([this] { openFile(); }); }, "Einen Tune laden (.np, Strg + O)" },
+        { &midiInBtn, "Von MIDI …", [this] { confirmDiscard ([this] { chooseMidi(); }); }, "Eine MIDI-Datei in einen Tune umwandeln: Akkorde werden Arpeggios, Schlagzeug bekommt eigene Instrumente" },
         { &d64Btn, "Von D64 …", [this] { confirmDiscard ([this] { openD64(); }); }, "Einen Tune aus einem Diskettenabbild (.d64) laden, z. B. WORK1.D64 aus dem JCH-Paket" },
-        { &saveBtn, "Speichern", [this] { saveFile (false); }, "Tune speichern (Strg + S)" },
-        { &saveAsBtn, "Speichern unter …", [this] { saveFile (true); }, "Tune unter neuem Namen speichern" },
-        { &sidBtn, "Als SID …", [this] { exportSid(); }, "Als .sid-Datei exportieren (spielbar in jedem SID-Player und im SID-Archiv)" },
-        { &midiBtn, "Als MIDI …", [this] { exportMidi(); }, "Als MIDI-Datei exportieren (über die SID-nach-MIDI-Umwandlung)" },
+        { &saveAsBtn, "Speichern (.np)", [this] { saveFile (true); }, "Tune als .np-Datei speichern (mit Dateiname); Strg + S speichert in die geöffnete Datei" },
+        { &sidBtn, "Speichern (.sid)", [this] { exportSid(); }, "Als .sid-Datei speichern (spielbar in jedem SID-Abspielprogramm und im SID-Archiv)" },
+        { &midiBtn, "Speichern (.mid)", [this] { exportMidi(); }, "Als MIDI-Datei speichern (über die SID-nach-MIDI-Umwandlung)" },
         { &playBtn, "", [this] { play (false); }, "Von Anfang spielen (F1)" },
         { &cursorBtn, "", [this] { play (true); }, "Ab der Cursor-Position spielen (F2)" },
         { &stopBtn, "", [this] { stop(); }, "Stopp (Esc)" },
@@ -934,7 +935,7 @@ void TrackerPanel::tuneChanged()
     spdLabel.setText (T ("Tempo %1", tune.speed()), juce::dontSendNotification);
     octLabel.setText (T ("Oktave %1", octave), juce::dontSendNotification);
     const auto pn = tune.playerName();
-    infoLabel.setText (T ("Player %1", pn.isNotEmpty() ? pn : T ("unbekannt")) + "   ·   " + T ("%1 Sequenzen", (int) tune.usedSequences().size())
+    infoLabel.setText (T ("Variante %1", pn.isNotEmpty() ? pn : T ("unbekannt")) + "   ·   " + T ("%1 Sequenzen", (int) tune.usedSequences().size())
                            + "   ·   " + T ("Länge etwa %1 s", juce::String (tune.estimateSeconds(), 1)), juce::dontSendNotification);
     repaint();
 }
@@ -980,7 +981,7 @@ void TrackerPanel::status (const juce::String& s) { statusLabel.setText (s, juce
 
 void TrackerPanel::updateTitle()
 {
-    window.setName (T ("Tracker") + " – " + (file != juce::File() ? file.getFileName() : T ("Neuer Tune")) + (dirty ? " *" : ""));
+    window.setName (titleBase() + " – " + (file != juce::File() ? file.getFileName() : T ("Neuer Tune")) + (dirty ? " *" : ""));
 }
 
 void TrackerPanel::setOctave (int o)
@@ -1073,13 +1074,13 @@ void TrackerPanel::newTune()
     t.loadPrg (BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, err);
     t.makeStarter();
     loadTune (t, {});
-    status (T ("Neuer Tune (Player v20.G4) mit fünf Start-Instrumenten: 1 Säge, 2 Puls, 3 Bass, 4 Schlagzeug, 5 Akkord"));
+    status (T ("Neuer Tune (Variante 20.G4) mit fünf Start-Instrumenten: 1 Säge, 2 Puls, 3 Bass, 4 Schlagzeug, 5 Akkord"));
 }
 
 void TrackerPanel::openFile()
 {
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
-    main.chooseOpenFile (T ("Tune des NewPlayer-Editors öffnen"), start.isDirectory() ? start : juce::File(), "*.prg;*.np;*.wrk;*",
+    main.chooseOpenFile (T ("Tune öffnen (.np)"), start.isDirectory() ? start : juce::File(), "*.prg;*.np;*.wrk;*",
                          [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f)
     {
         if (safe == nullptr) return;
@@ -1123,8 +1124,8 @@ void TrackerPanel::openD64()
             { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", err.isNotEmpty() ? err : T ("Die Datei lässt sich nicht lesen")); return; }
             safe->stop();
             safe->loadTune (t, {});
-            safe->window.setName (T ("Tracker") + " – " + f.name);
-            safe->status (T ("Geladen: %1 (Player %2)", f.name, t.playerName()));
+            safe->window.setName (titleBase() + " – " + f.name);
+            safe->status (T ("Geladen: %1 (Variante %2)", f.name, t.playerName()));
         });
     });
 }
@@ -1132,7 +1133,7 @@ void TrackerPanel::openD64()
 void TrackerPanel::chooseMidi()
 {
     const juce::File start (main.archive().settings.getProperty ("lastMidiFolder").toString());
-    main.chooseOpenFile (T ("MIDI-Datei in einen NewPlayer-Tune umwandeln"), start.isDirectory() ? start : juce::File(), "*.mid;*.midi;*.kar;*.rmi",
+    main.chooseOpenFile (T ("MIDI-Datei in einen Tune umwandeln"), start.isDirectory() ? start : juce::File(), "*.mid;*.midi;*.kar;*.rmi",
                          [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f) { if (safe != nullptr) safe->importMidi (f); });
 }
 
@@ -1143,9 +1144,9 @@ void TrackerPanel::importMidi (const juce::File& midi)
     if (! r.ok) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", r.report); return; }
     loadTune (r.tune, {});
     dirty = true;                                   // not saved yet
-    window.setName (T ("Tracker") + " – " + midi.getFileNameWithoutExtension() + " *");
+    window.setName (titleBase() + " – " + midi.getFileNameWithoutExtension() + " *");
     status (T ("MIDI umgewandelt: %1", midi.getFileName()));
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("MIDI → NewPlayer"), r.report + "\n\n" + T ("Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten."));
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("MIDI → Vibrants-Tracker"), r.report + "\n\n" + T ("Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten."));
 }
 
 void TrackerPanel::saveFile (bool saveAs)
@@ -1171,7 +1172,7 @@ void TrackerPanel::exportSid()
 {
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
     const auto name = (file != juce::File() ? file.getFileNameWithoutExtension() : juce::String ("Neuer Tune"));
-    main.chooseSaveFile (T ("Als SID-Datei exportieren"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (name + ".sid"),
+    main.chooseSaveFile (T ("Als SID-Datei speichern"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (name + ".sid"),
                          "*.sid", [safe = juce::Component::SafePointer<TrackerPanel> (this), name] (const juce::File& f)
     {
         if (safe == nullptr) return;
@@ -1186,7 +1187,7 @@ void TrackerPanel::exportMidi()
 {
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
     const auto name = (file != juce::File() ? file.getFileNameWithoutExtension() : juce::String ("Neuer Tune"));
-    main.chooseSaveFile (T ("Als MIDI-Datei exportieren"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (name + ".mid"),
+    main.chooseSaveFile (T ("Als MIDI-Datei speichern"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (name + ".mid"),
                          "*.mid", [safe = juce::Component::SafePointer<TrackerPanel> (this), name] (const juce::File& f)
     {
         if (safe == nullptr) return;
@@ -1206,7 +1207,7 @@ void TrackerPanel::resized()
 {
     auto r = getLocalBounds().reduced (8);
     auto row1 = r.removeFromTop (28);
-    for (auto* b : { &newBtn, &openBtn, &d64Btn, &midiInBtn, &saveBtn, &saveAsBtn, &sidBtn, &midiBtn })
+    for (auto* b : { &newBtn, &openBtn, &d64Btn, &midiInBtn, &saveAsBtn, &sidBtn, &midiBtn })
     {
         const int w = juce::jlimit (60, 150, juce::GlyphArrangement::getStringWidthInt (font (14.0f), b->getButtonText()) + 26);
         b->setBounds (row1.removeFromLeft (w));
@@ -1256,7 +1257,7 @@ bool TrackerPanel::keyPressed (const juce::KeyPress& k)
 
 // ================================================================================================ the window
 TrackerWindow::TrackerWindow (MainComponent& m)
-    : juce::DocumentWindow (T ("Tracker"), m.theme().panel, juce::DocumentWindow::allButtons), main (m)
+    : juce::DocumentWindow (T ("Vibrants-Tracker") + " " SM_VERSION_STRING, m.theme().panel, juce::DocumentWindow::allButtons), main (m)
 {
     setUsingNativeTitleBar (true);
     content = new TrackerPanel (m, *this);
