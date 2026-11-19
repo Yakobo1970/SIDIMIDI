@@ -52,7 +52,7 @@ void backup (const juce::File& root, const juce::File& file, const juce::File& b
     const auto target = backupDir.getChildFile (rel);
     if (target.existsAsFile() || ! file.existsAsFile()) return;
     target.getParentDirectory().createDirectory();
-    file.copyFileTo (target);
+    if (! file.copyFileTo (target)) { juce::Thread::sleep (200); file.copyFileTo (target); }
 }
 
 bool dirHasFiles (const juce::File& dir)
@@ -284,16 +284,52 @@ int verifyHvscHeaders (const juce::File& root, const std::vector<HvscOp>& ops, j
 // ================================================================================================ package
 namespace
 {
-juce::File findPackageRoot (const juce::File& dir, int version, int depth = 0)
+// copies a file; network drives and virus scanners sometimes refuse once, so retry a few times
+bool copyWithRetry (const juce::File& src, const juce::File& dst)
 {
-    if (dir.getChildFile ("DOCUMENTS").getChildFile (juce::String::formatted ("Update%02d.hvs", version)).existsAsFile()) return dir;
+    for (int attempt = 0; attempt < 5; ++attempt)
+    {
+        if (attempt > 0) juce::Thread::sleep (150 * attempt);
+        dst.getParentDirectory().createDirectory();
+        if (src.copyFileTo (dst)) return true;
+        if (dst.existsAsFile() && dst.getSize() == src.getSize()) return true;
+    }
+    return false;
+}
+
+// folder that contains "<folder>/<script>" (searched up to two levels deep)
+juce::File findPackageRoot (const juce::File& dir, const juce::String& script, const juce::String& folder, int depth = 0)
+{
+    if (dir.getChildFile (folder).getChildFile (script).existsAsFile()) return dir;
     if (depth >= 2) return {};
     for (const auto& c : juce::RangedDirectoryIterator (dir, false, "*", juce::File::findDirectories))
     {
-        auto r = findPackageRoot (c.getFile(), version, depth + 1);
+        auto r = findPackageRoot (c.getFile(), script, folder, depth + 1);
         if (r != juce::File()) return r;
     }
     return {};
+}
+
+// extraction with the system's bsdtar/libarchive (reads 7z incl. PPMd): Windows 10+, macOS
+bool extractWithSystemTar (const juce::File& archive, const juce::File& dest, const std::function<bool()>& stillWanted, juce::String& error)
+{
+   #if JUCE_WINDOWS
+    const auto tar = juce::File::getSpecialLocation (juce::File::windowsSystemDirectory).getChildFile ("tar.exe");
+   #else
+    const juce::File tar ("/usr/bin/tar");
+   #endif
+    if (! tar.existsAsFile()) { error = U8("Das Archiv nutzt ein Verfahren (PPMd), das SIDiMIDI nicht selbst entpacken kann, und das System-Programm „tar“ wurde nicht gefunden."); return false; }
+    juce::ChildProcess p;
+    if (! p.start (juce::StringArray { tar.getFullPathName(), "-xf", archive.getFullPathName(), "-C", dest.getFullPathName() }, juce::ChildProcess::wantStdErr))
+    { error = "tar konnte nicht gestartet werden"; return false; }
+    while (p.isRunning())
+    {
+        if (! stillWanted()) { p.kill(); error = "Abgebrochen"; return false; }
+        juce::Thread::sleep (80);
+    }
+    const auto code = p.getExitCode();
+    if (code != 0) { error = "tar meldet Fehler " + juce::String ((int) code) + ": " + p.readAllProcessOutput().trim().substring (0, 300); return false; }
+    return true;
 }
 
 bool extractZip (const juce::File& zipFile, const juce::File& dest, const std::function<bool (double)>& progress, juce::String& error)
@@ -354,41 +390,76 @@ HvscInstallResult installHvscPackage (const juce::File& root, int version, const
     if (packageFile.hasFileExtension ("zip"))
         ok = extractZip (packageFile, work, [&] (double f) { return report (U8("Entpacken …"), 0.05 + 0.35 * f); }, err);
     else
+    {
         ok = SevenZip::extractAll (packageFile, work, [&] (juce::uint64 d, juce::uint64 t, const juce::String&) { return report (U8("Entpacken …"), 0.05 + 0.35 * (t > 0 ? (double) d / (double) t : 0.0)); }, err);
+        if (! ok && err != "Abgebrochen")
+        {
+            // methods the own reader does not know (the HVSC packages use PPMd): let the system's tar do it
+            const auto own = err;
+            work.deleteRecursively();
+            work.createDirectory();
+            ok = extractWithSystemTar (packageFile, work, [&] { return report (U8("Entpacken …"), 0.2); }, err);
+            if (! ok && err != "Abgebrochen") err = own + " / " + err;
+        }
+    }
     if (! ok) { r.cancelled = (err == "Abgebrochen"); return fail (err.isEmpty() ? juce::String ("Entpacken fehlgeschlagen") : err); }
 
-    // 2) find the package folder
-    const auto pkg = findPackageRoot (work, version);
-    if (pkg == juce::File()) return fail (juce::String::formatted (U8("Das Paket enthält kein DOCUMENTS/Update%02d.hvs – es passt nicht zu Version %d."), version, version));
+    // 2) find the package: official layout = "update/UpdateNN.hvs" (+ update/DOCUMENTS, update/fix, update/new); older/simple = "DOCUMENTS/UpdateNN.hvs"
+    const auto scriptName = juce::String::formatted ("Update%02d.hvs", version);
+    juce::File pkg;
+    bool official = false;
+    pkg = findPackageRoot (work, scriptName, "update");
+    official = pkg != juce::File();
+    if (! official) pkg = findPackageRoot (work, scriptName, "DOCUMENTS");
+    if (pkg == juce::File()) return fail (juce::String::formatted (U8("Das Paket enthält kein Update%02d.hvs – es passt nicht zu Version %d."), version, version));
 
-    // 3) copy over the collection
-    const int total = std::max (1, countFiles (pkg));
+    // 3) copy into the collection (official layout: the "update" folder, which the script refers to as /update/...)
+    const auto sourceTop = official ? pkg.getChildFile ("update") : pkg;
+    const auto destTop = official ? root.getChildFile ("update") : root;
+    const int total = std::max (1, countFiles (sourceTop));
     int done = 0;
-    for (const auto& e : juce::RangedDirectoryIterator (pkg, true, "*", juce::File::findFiles))
+    for (const auto& e : juce::RangedDirectoryIterator (sourceTop, true, "*", juce::File::findFiles))
     {
         if (! report (U8("Dateien einspielen …"), 0.40 + 0.30 * ((double) done / total))) { r.cancelled = true; return fail ("Abgebrochen"); }
         ++done;
         const auto f = e.getFile();
         const auto ext = f.getFileExtension().toLowerCase();
         if (ext == ".exe" || ext == ".dll" || ext == ".bat" || ext == ".cmd" || ext == ".com") continue;   // never copy programs into the collection
-        const auto dst = root.getChildFile (f.getRelativePathFrom (pkg));
+        const auto dst = destTop.getChildFile (f.getRelativePathFrom (sourceTop));
         if (dst.existsAsFile()) backup (root, dst, backupDir);
         dst.getParentDirectory().createDirectory();
-        if (f.copyFileTo (dst)) ++r.copiedFiles;
+        if (copyWithRetry (f, dst)) ++r.copiedFiles;
         else { r.applied.errors++; r.applied.messages.add ("Kopieren fehlgeschlagen: " + dst.getFullPathName()); }
     }
     if (r.applied.errors > 0) return fail (U8("Dateien konnten nicht eingespielt werden – siehe Protokoll"));
 
     // 4) run the script
-    const auto scriptFile = root.getChildFile ("DOCUMENTS").getChildFile (juce::String::formatted ("Update%02d.hvs", version));
+    const auto scriptFile = official ? destTop.getChildFile (scriptName) : root.getChildFile ("DOCUMENTS").getChildFile (scriptName);
     const auto ops = parseHvscScript (readDocumentText (scriptFile), r.warnings);
     if (ops.empty()) return fail ("Das Update-Skript ist leer oder nicht lesbar");
-    const bool completed = applyHvscScript (root, ops, backupDir, r.applied, [&] (int d, int t) { return report (U8("Update-Skript ausführen …"), 0.70 + 0.28 * (t > 0 ? (double) d / t : 1.0)); });
+    const bool completed = applyHvscScript (root, ops, backupDir, r.applied, [&] (int d, int t) { return report (U8("Update-Skript ausführen …"), 0.70 + 0.25 * (t > 0 ? (double) d / t : 1.0)); });
     if (! completed) { r.cancelled = true; return fail (U8("Abgebrochen – die Sammlung ist nur teilweise aktualisiert (Backup: ") + backupDir.getFullPathName() + ")"); }
+    if (r.applied.errors > 0) return fail (U8("Einzelne Schritte sind fehlgeschlagen – siehe Protokoll (die Dokumente wurden nicht umgestellt)"));
 
-    // 5) staging folder
-    const auto staging = root.getChildFile ("update");
-    if (staging.isDirectory() && r.applied.errors == 0) staging.deleteRecursively();
+    // 5) documents last: the highest DOCUMENTS/UpdateNN.hvs defines the version, so only after everything worked
+    if (official)
+    {
+        const auto docs = destTop.getChildFile ("DOCUMENTS");
+        if (docs.isDirectory())
+            for (const auto& e : juce::RangedDirectoryIterator (docs, true, "*", juce::File::findFiles))
+            {
+                const auto dst = root.getChildFile ("DOCUMENTS").getChildFile (e.getFile().getRelativePathFrom (docs));
+                if (dst.existsAsFile()) backup (root, dst, backupDir);
+                dst.getParentDirectory().createDirectory();
+                if (copyWithRetry (e.getFile(), dst)) ++r.copiedFiles;
+                else { r.applied.errors++; r.applied.messages.add ("Kopieren fehlgeschlagen: " + dst.getFullPathName()); }
+            }
+        const auto dstScript = root.getChildFile ("DOCUMENTS").getChildFile (scriptName);
+        if (! copyWithRetry (scriptFile, dstScript)) { r.applied.errors++; r.applied.messages.add ("Kopieren fehlgeschlagen: " + dstScript.getFullPathName()); }
+    }
+
+    // 6) staging folder
+    if (destTop.isDirectory() && destTop != root && r.applied.errors == 0) destTop.deleteRecursively();
     report ("Fertig", 1.0);
     r.ok = r.applied.errors == 0;
     if (! r.ok) r.error = U8("Einzelne Schritte sind fehlgeschlagen – siehe Protokoll");

@@ -288,6 +288,40 @@ int main (int argc, char** argv)
         return r.ok ? 0 : 1;
     }
 
+    if (cmd == "hvscupdate" && argc > 3)
+    {
+        // SidTest hvscupdate <root> <backupBase> [maxVersion] : the same chain as the HVSC panel (check, download, install)
+        const juce::File root (juce::String::fromUTF8 (argv[2])), backupBase (juce::String::fromUTF8 (argv[3]));
+        const int maxVersion = argc > 4 ? juce::String (argv[4]).getIntValue() : 9999;
+        const int local = Hvsc::detectVersion (root);
+        out ("Installiert: #" + juce::String (local));
+        const auto dl = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("SIDIMIDI-hvsc-dl-test");
+        dl.createDirectory();
+        int installed = local;
+        for (int v = local + 1; v <= maxVersion; ++v)
+        {
+            const auto name = HvscOnline::updateFileName (v);
+            juce::String used;
+            const auto size = HvscOnline::remoteSize (name, &used);
+            if (size < 0) { out ("Update #" + juce::String (v) + " gibt es nicht (Ende)"); break; }
+            out ("Update #" + juce::String (v) + ": " + juce::String (size) + " Bytes von " + used);
+            juce::String err;
+            const auto file = dl.getChildFile (name);
+            if (! HvscOnline::download (name, file, [] (juce::int64, juce::int64) { return true; }, err)) { out ("Download-Fehler: " + err); return 1; }
+            const auto r = installHvscPackage (root, v, file, backupBase.getChildFile ("Update" + juce::String (v)), {});
+            out (juce::String (r.ok ? "  ok" : "  FEHLER: " + r.error) + ": kopiert " + juce::String (r.copiedFiles) + ", verschoben " + juce::String (r.applied.moved)
+                 + ", ersetzt " + juce::String (r.applied.replaced) + ", gelöscht " + juce::String (r.applied.deleted) + ", Köpfe " + juce::String (r.applied.patched)
+                 + ", fehlend " + juce::String (r.applied.missing) + ", Fehler " + juce::String (r.applied.errors) + ", Warnungen " + juce::String (r.warnings.size()));
+            for (int i = 0; i < std::min (8, r.applied.messages.size()); ++i) out ("    " + r.applied.messages[i]);
+            file.deleteFile();
+            if (! r.ok) return 1;
+            installed = v;
+        }
+        dl.deleteRecursively();
+        out ("Jetzt installiert: #" + juce::String (Hvsc::detectVersion (root)) + " (vorher #" + juce::String (local) + ")");
+        return installed > local ? 0 : 2;
+    }
+
     out ("usage: SidTest info <file> | hvsc <folder> | scanstat <folder> [max] | hvscverify <root> <script.hvs> | hvscapply <root> <script.hvs> <backup>");
     return 2;
 }
