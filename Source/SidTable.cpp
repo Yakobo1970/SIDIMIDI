@@ -174,6 +174,8 @@ SidTable::SidTable (Archive& a) : arch (a), table ("sids", this)
     table.setMultipleSelectionEnabled (true);
     table.getHeader().setStretchToFitActive (false);
     table.setWantsKeyboardFocus (true);
+    table.addKeyListener (&navKeys);
+    clickTimer.cb = [this] { startPendingEdit(); };
     auto& hdr = table.getHeader();
     int flags = juce::TableHeaderComponent::resizable | juce::TableHeaderComponent::sortable | juce::TableHeaderComponent::draggable | juce::TableHeaderComponent::appearsOnColumnMenu;
     for (auto& c : kCols)
@@ -204,6 +206,9 @@ SidTable::SidTable (Archive& a) : arch (a), table ("sids", this)
 SidTable::~SidTable()
 {
     stopTimer();
+    clickTimer.stopTimer();
+    table.removeKeyListener (&navKeys);
+    editor.reset();
     lsState->alive = false;
     landscapePool.removeAllJobs (true, 5000);
     table.getHeader().removeListener (watcherOf (watcher));
@@ -456,10 +461,16 @@ void SidTable::paintRowBackground (juce::Graphics& g, int row, int w, int h, boo
     }
 }
 
-void SidTable::paintCell (juce::Graphics& g, int row, int col, int w, int h, bool)
+void SidTable::paintCell (juce::Graphics& g, int row, int col, int w, int h, bool selected)
 {
     auto* e = rowEntry (row);
     if (e == nullptr) return;
+    // cell cursor (moves with the arrow keys): shows which field a click or typing edits
+    struct Cursor
+    {
+        juce::Graphics& g; bool on; int w, h; juce::Colour c;
+        ~Cursor() { if (on) { g.setColour (c); g.drawRect (0, 0, w, h, 2); } }
+    } cursor { g, selected && isEditableCol (col) && col == curCol && row == table.getLastRowSelected(), w, h, theme().accent.withAlpha (0.9f) };
     const auto& th = theme();
     if (col == cRating)
     {
@@ -623,6 +634,13 @@ void SidTable::cellClicked (int row, int col, const juce::MouseEvent& e)
         arch.setFavourite (*en, ! en->favourite);
         table.repaintRow (row);
     }
+    else if (isEditableCol (col) && ! en->has (fMissing))
+    {
+        // the last clicked row of a (multi) selection gets the editor directly - the selection stays as it is
+        pendingId = en->id;
+        pendingCol = col;
+        clickTimer.startTimer (30);
+    }
     else if (col == cRating)
     {
         const int idx = table.getHeader().getIndexOfColumnId (col, true);
@@ -636,13 +654,14 @@ void SidTable::cellClicked (int row, int col, const juce::MouseEvent& e)
 
 void SidTable::cellDoubleClicked (int row, int col, const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu() || col == cFav || col == cRating) return;
+    if (e.mods.isPopupMenu() || col == cFav || col == cRating || isEditableCol (col)) return;
     if (onPlay) onPlay (rowEntry (row));
 }
 
 void SidTable::selectedRowsChanged (int)
 {
     if (inRefresh) return;
+    if (editor != nullptr) finishEdit (true, false);
     auto* e = selectedEntry();
     if (e != nullptr) lastSelectedId = e->id;
     if (onSelect) onSelect (e);
@@ -650,7 +669,11 @@ void SidTable::selectedRowsChanged (int)
 
 void SidTable::returnKeyPressed (int row)
 {
-    if (onPlay) onPlay (rowEntry (row));
+    // Return on an editable cell opens it (content selected), elsewhere it plays
+    auto* e = rowEntry (row);
+    if (e == nullptr) return;
+    if (isEditableCol (curCol) && ! e->has (fMissing)) { startEdit (row, curCol); return; }
+    if (onPlay) onPlay (e);
 }
 
 juce::String SidTable::getCellTooltip (int row, int col)
@@ -668,6 +691,443 @@ juce::String SidTable::getCellTooltip (int row, int col)
     if (col == cStil || col == cNote) return e->stilFirst;
     if (col == cPath || col == cFile) return e->path;
     return {};
+}
+
+// ================================================================================================ inline editing
+// suggestions while typing: values of the column that contain the text
+struct SidTable::SuggestBox : public juce::Component
+{
+    explicit SuggestBox (SidTable& o) : owner (o) { setAlwaysOnTop (true); setWantsKeyboardFocus (false); setMouseClickGrabsKeyboardFocus (false); }
+    SidTable& owner;
+    juce::StringArray items;
+    juce::String query;
+    int selected = -1;
+    static constexpr int rowH = 20;
+    void paint (juce::Graphics& g) override
+    {
+        const auto& th = owner.theme();
+        g.setColour (th.panel);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
+        g.setColour (th.accent);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 4.0f, 1.0f);
+        for (int i = 0; i < items.size(); ++i)
+        {
+            auto r = juce::Rectangle<int> (2, 2 + i * rowH, getWidth() - 4, rowH);
+            if (i == selected) { g.setColour (th.accent.withAlpha (0.4f)); g.fillRoundedRectangle (r.toFloat(), 3.0f); }
+            const auto& t = items[i];
+            const int at = t.indexOfIgnoreCase (query);
+            juce::AttributedString as;
+            as.setJustification (juce::Justification::centredLeft);
+            as.setWordWrap (juce::AttributedString::none);
+            auto add = [&] (const juce::String& part, juce::Colour c, bool bold) { if (part.isNotEmpty()) as.append (part, ui::font (13.0f, bold), c); };
+            if (at >= 0 && query.isNotEmpty())
+            {
+                add (t.substring (0, at), th.text, false);
+                add (t.substring (at, at + query.length()), th.accent, true);
+                add (t.substring (at + query.length()), th.text, false);
+            }
+            else add (t, th.text, false);
+            as.draw (g, r.reduced (6, 0).toFloat());
+        }
+    }
+    void mouseMove (const juce::MouseEvent& e) override { const int i = (e.y - 2) / rowH; if (i != selected && i >= 0 && i < items.size()) { selected = i; repaint(); } }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        const int i = (e.y - 2) / rowH;
+        if (i >= 0 && i < items.size())
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<SidTable> (&owner), i] { if (safe) safe->acceptSuggestion (i); });
+    }
+};
+
+// cell editor: arrow keys / Tab / Return go to the table first (cell navigation)
+struct SidTable::CellEditor : juce::TextEditor
+{
+    std::function<bool (const juce::KeyPress&)> onKey;
+    std::function<void()> onClick;
+    bool keyPressed (const juce::KeyPress& k) override { return (onKey && onKey (k)) || juce::TextEditor::keyPressed (k); }
+    void mouseDown (const juce::MouseEvent& e) override { if (onClick) onClick(); juce::TextEditor::mouseDown (e); }
+};
+
+bool SidTable::isEditableCol (int col) const
+{
+    return (col == cTitle || col == cAuthor || col == cReleased) && table.getHeader().isColumnVisible (col);
+}
+
+juce::String SidTable::rawValue (const Entry& e, int col) const
+{
+    const auto& v = col == cTitle ? e.title : col == cAuthor ? e.author : e.released;
+    return v == "<?>" ? juce::String() : v;
+}
+
+int SidTable::nextCol (int col, int dir, bool editableOnly) const
+{
+    auto& h = table.getHeader();
+    const int n = h.getNumColumns (true);
+    int idx = h.getIndexOfColumnId (col, true);
+    if (idx < 0) idx = dir > 0 ? -1 : n;
+    for (int i = idx + dir; i >= 0 && i < n; i += dir)
+    {
+        const int c = h.getColumnIdOfIndex (i, true);
+        if (! editableOnly || isEditableCol (c)) return c;
+    }
+    return col;
+}
+
+void SidTable::scrollToColumn (int col)
+{
+    auto& h = table.getHeader();
+    const int idx = h.getIndexOfColumnId (col, true);
+    if (idx < 0) return;
+    auto* vp = table.getViewport();
+    const auto r = h.getColumnPosition (idx);
+    int x = vp->getViewPositionX();
+    const int w = vp->getViewWidth();
+    if (r.getX() < x) x = r.getX();
+    else if (r.getRight() > x + w) x = juce::jmin (r.getX(), r.getRight() - w);
+    if (x != vp->getViewPositionX()) vp->setViewPosition (x, vp->getViewPositionY());
+}
+
+bool SidTable::canEdit (int row, int col) const
+{
+    auto* e = rowEntry (row);
+    return e != nullptr && isEditableCol (col) && ! e->has (fMissing) && ! e->has (fProtected);
+}
+
+// moves the cell cursor; with edit = true the target cell opens with its content selected
+void SidTable::goTo (int row, int col, bool edit)
+{
+    if (rows.empty()) return;
+    row = juce::jlimit (0, (int) rows.size() - 1, row);
+    curCol = col;
+    if (table.getNumSelectedRows() != 1 || table.getSelectedRow() != row) table.selectRow (row);
+    table.scrollToEnsureRowIsOnscreen (row);
+    scrollToColumn (col);
+    table.repaint();
+    if (edit && canEdit (row, col)) startEdit (row, col);
+    else table.grabKeyboardFocus();
+}
+
+void SidTable::enterCaretMode()
+{
+    if (editor == nullptr) return;
+    caretMode = true;
+    editor->moveCaretToEnd();
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<juce::TextEditor> (editor.get())] { if (safe != nullptr) safe->moveCaretToEnd(); });
+}
+
+void SidTable::startPendingEdit()
+{
+    if (juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+    {
+        if (auto* dc = juce::DragAndDropContainer::findParentDragContainerFor (this); dc != nullptr && dc->isDragAndDropActive()) { pendingId = 0; return; }
+        clickTimer.startTimer (30);   // wait for the mouse-up
+        return;
+    }
+    const int id = pendingId, col = pendingCol;
+    pendingId = 0;
+    if (id == 0 || (editor != nullptr && editId == id && editCol == col)) return;
+    const int r = rowOf (id);
+    if (r >= 0 && table.isRowSelected (r)) startEdit (r, col);
+}
+
+void SidTable::startEdit (int row, int col, const juce::String& typed)
+{
+    auto* e = rowEntry (row);
+    if (e == nullptr || ! isEditableCol (col)) return;
+    if (e->has (fMissing)) { if (onStatus) onStatus (T ("Datei fehlt – nicht bearbeitbar")); return; }
+    if (e->has (fProtected)) { if (onStatus) onStatus (arch.protectedMessage()); return; }
+    finishEdit (true, false);
+    table.scrollToEnsureRowIsOnscreen (row);
+    editId = e->id; editCol = col; curCol = col;
+    scrollToColumn (col);
+    auto ce = std::make_unique<CellEditor>();
+    ce->onKey = [this] (const juce::KeyPress& k) { return editorKey (k); };
+    ce->onClick = [this] { caretMode = true; };
+    caretMode = false;
+    editor = std::move (ce);
+    editor->setFont (ui::font (13.0f));
+    editor->setIndents (4, 3);
+    editor->setInputRestrictions (32);
+    editor->setText (rawValue (*e, col), false);
+    editor->addListener (this);
+    editOriginal = editor->getText();
+    knownValues.clear();
+    {
+        std::map<juce::String, int> count;
+        for (auto& x : arch.entries())
+            if (auto v = rawValue (*x, col).trim(); v.isNotEmpty()) ++count[v];
+        knownValues.assign (count.begin(), count.end());
+    }
+    const auto& th = theme();
+    editor->setColour (juce::TextEditor::outlineColourId, th.accent);
+    editor->setColour (juce::TextEditor::focusedOutlineColourId, th.accent);
+    editor->setColour (juce::TextEditor::backgroundColourId, th.bg);
+    editor->setColour (juce::TextEditor::textColourId, th.text);
+    editor->setColour (juce::TextEditor::highlightColourId, th.accent);
+    editor->setColour (juce::TextEditor::highlightedTextColourId, th.bg.getPerceivedBrightness() < 0.5f ? juce::Colours::black : juce::Colours::white);
+    editor->setColour (juce::CaretComponent::caretColourId, th.text);
+    editor->setSelectAllWhenFocused (true);
+    editor->applyColourToAllText (th.text);
+    // the editor lives in the scrolled row area: it moves with the mouse wheel / scrollbars
+    auto* content = table.getViewport()->getViewedComponent();
+    editor->setAlwaysOnTop (true);
+    content->addAndMakeVisible (*editor);
+    editor->setBounds (content->getLocalArea (&table, table.getCellPosition (col, row, true)).expanded (0, 1));
+    editor->grabKeyboardFocus();
+    table.repaint();
+    if (typed.isNotEmpty())   // typing started the edit: replace the content with that character
+    {
+        editor->setText (typed, false);
+        updateSuggestions();
+        editor->moveCaretToEnd();
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<juce::TextEditor> (editor.get())]
+        { if (safe != nullptr && ! safe->hasKeyboardFocus (false)) { safe->grabKeyboardFocus(); safe->moveCaretToEnd(); } });
+        return;
+    }
+    editor->selectAll();
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<juce::TextEditor> (editor.get())]
+    { if (safe != nullptr) { if (! safe->hasKeyboardFocus (false)) safe->grabKeyboardFocus(); safe->selectAll(); } });
+}
+
+void SidTable::textEditorEscapeKeyPressed (juce::TextEditor&)
+{
+    finishEdit (false);
+    table.grabKeyboardFocus();
+    table.repaint();
+}
+
+void SidTable::textEditorFocusLost (juce::TextEditor&)
+{
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<SidTable> (this)]
+    {
+        if (safe == nullptr) return;
+        if (safe->suggest != nullptr && safe->suggest->isVisible() && safe->suggest->isMouseOverOrDragging()) return;
+        safe->finishEdit (true, true);
+    });
+}
+
+void SidTable::finishEdit (bool commit, bool toSelection)
+{
+    hideSuggestions();
+    if (editor == nullptr) return;
+    auto ed = std::move (editor);
+    ed->removeListener (this);
+    const auto value = ed->getText().trim();
+    const int id = editId, col = editCol;
+    ed.reset();
+    if (! commit) return;
+    auto* e = arch.byId (id);
+    if (e == nullptr) return;
+    std::vector<int> ids;
+    const auto sel = selectedEntries();
+    const bool multi = toSelection && sel.size() > 1 && std::find (sel.begin(), sel.end(), e) != sel.end();
+    for (auto* x : multi ? sel : std::vector<Entry*> { e })
+        if (! x->has (fMissing) && ! x->has (fProtected) && value != rawValue (*x, col).trim()) ids.push_back (x->id);
+    if (ids.empty()) return;
+    if (ids.size() == 1) { applyValue (ids, col, value); return; }
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, T ("Mehrere Dateien ändern"),
+        T ("%1 = „%2“\n\nin %3 markierte Dateien schreiben?", T (colDef (col).name), value, (int) ids.size()),
+        T ("Alle %1 ändern", (int) ids.size()), T ("Abbrechen"), this,
+        juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<SidTable> (this), ids, col, value] (int r)
+        { if (r != 0 && safe != nullptr) safe->applyValue (ids, col, value); }));
+}
+
+void SidTable::copyValueToSelection (int col, const Entry& from)
+{
+    const auto value = rawValue (from, col).trim();
+    std::vector<int> ids;
+    for (auto* x : selectedEntries())
+        if (! x->has (fMissing) && ! x->has (fProtected) && value != rawValue (*x, col).trim()) ids.push_back (x->id);
+    if (! ids.empty()) applyValue (ids, col, value);
+}
+
+void SidTable::applyValue (const std::vector<int>& ids, int col, const juce::String& value)
+{
+    const int field = col == cTitle ? Archive::fieldTitle : col == cAuthor ? Archive::fieldAuthor : Archive::fieldReleased;
+    int ok = 0;
+    juce::String errors;
+    Archive::UndoGroup g (arch, ids.size() == 1 ? T ("%1: %2", T (colDef (col).name), arch.byId (ids[0]) != nullptr ? arch.byId (ids[0])->name : juce::String())
+                                                : T ("%1 in %2 Dateien", T (colDef (col).name), (int) ids.size()));
+    for (int id : ids)
+        if (auto* x = arch.byId (id))
+        {
+            juce::String err;
+            if (arch.setSidField (*x, field, value, err)) ++ok;
+            else errors << x->name << ": " << err << "\n";
+        }
+    if (errors.isNotEmpty())
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", T ("Nicht geschrieben:") + "\n" + errors.substring (0, 2000));
+    if (onStatus && ok > 0)
+        onStatus (ok == 1 ? T ("Gespeichert in %1 (Original einmalig gesichert in %2)", arch.byId (ids[0]) != nullptr ? arch.byId (ids[0])->name : juce::String(), arch.backupFolder().getFullPathName())
+                          : T ("%1 in %2 Dateien geschrieben (Originale einmalig gesichert)", T (colDef (col).name), ok));
+    table.repaint();
+    if (onEdited) onEdited();
+}
+
+bool SidTable::navKey (const juce::KeyPress& k)
+{
+    if (editor != nullptr || rows.empty()) return false;
+    const auto mods = k.getModifiers();
+    if (mods.isAnyModifierKeyDown()) return false;   // Shift + arrows: extend the selection as usual
+    const int code = k.getKeyCode();
+    const int row = juce::jmax (0, table.getLastRowSelected());
+    int to = row;
+    if (code == juce::KeyPress::upKey) to = row - 1;
+    else if (code == juce::KeyPress::downKey) to = row + 1;
+    else if (code == juce::KeyPress::pageUpKey) to = row - pageRows();
+    else if (code == juce::KeyPress::pageDownKey) to = row + pageRows();
+    else return false;
+    to = juce::jlimit (0, (int) rows.size() - 1, to);
+    goTo (to, curCol, true);
+    return true;
+}
+
+bool SidTable::editorKey (const juce::KeyPress& k)
+{
+    if (editor == nullptr) return false;
+    const int row = rowOfId (editId);
+    if (row < 0) return false;
+    const int col = editCol;
+    const auto code = k.getKeyCode();
+    const bool plain = ! k.getModifiers().isCommandDown() && ! k.getModifiers().isAltDown();
+    if (suggest != nullptr && suggest->isVisible())
+    {
+        auto& sb = *suggest;
+        if (code == juce::KeyPress::downKey) { sb.selected = juce::jmin (sb.items.size() - 1, sb.selected + 1); sb.repaint(); return true; }
+        if (code == juce::KeyPress::upKey) { sb.selected = juce::jmax (-1, sb.selected - 1); sb.repaint(); return true; }
+        if (code == juce::KeyPress::escapeKey) { hideSuggestions(); return true; }
+        if ((code == juce::KeyPress::returnKey || code == juce::KeyPress::tabKey) && sb.selected >= 0)
+        {
+            editor->setText (sb.items[sb.selected], false);
+            hideSuggestions();
+        }
+        else if (code == juce::KeyPress::returnKey || code == juce::KeyPress::tabKey) hideSuggestions();
+    }
+    auto commitAndGo = [this] (int toRow, int toCol)
+    {
+        finishEdit (true, false);
+        goTo (toRow, toCol, true);
+    };
+    if (code == juce::KeyPress::returnKey && plain)
+    {
+        const auto sel = selectedEntries();
+        const int id = editId;
+        const bool multi = sel.size() > 1 && std::any_of (sel.begin(), sel.end(), [id] (Entry* x) { return x->id == id; });
+        if (multi) { finishEdit (true); return true; }                       // asks before writing into all selected files
+        if (row + 1 >= (int) rows.size()) { finishEdit (true, false); goTo (row, col, false); return true; }
+        commitAndGo (row + 1, col);
+        return true;
+    }
+    if (code == juce::KeyPress::escapeKey) { textEditorEscapeKeyPressed (*editor); return true; }
+    if (code == juce::KeyPress::tabKey)
+    {
+        const int c = nextCol (col, k.getModifiers().isShiftDown() ? -1 : 1, true);
+        if (c != col) commitAndGo (row, c);
+        return true;
+    }
+    // like a spreadsheet: an unchanged field lets the arrow keys walk from cell to cell; once something was typed,
+    // left/right move the caret, up/down stay, Return saves
+    if (code == juce::KeyPress::F2Key) { enterCaretMode(); return true; }
+    const bool up = code == juce::KeyPress::upKey, down = code == juce::KeyPress::downKey;
+    const bool left = code == juce::KeyPress::leftKey, right = code == juce::KeyPress::rightKey;
+    const bool page = code == juce::KeyPress::pageUpKey || code == juce::KeyPress::pageDownKey;
+    if (! (up || down || left || right || page)) return false;
+    const bool modified = caretMode || editor->getText() != editOriginal;
+    if (modified) return up || down || page;
+    if (k.getModifiers().isAnyModifierKeyDown()) return false;
+    int toRow = row, toCol = col;
+    if (up) toRow = row - 1;
+    else if (down) toRow = row + 1;
+    else if (page) toRow = row + (code == juce::KeyPress::pageUpKey ? -pageRows() : pageRows());
+    else toCol = nextCol (col, left ? -1 : 1, false);
+    toRow = juce::jlimit (0, (int) rows.size() - 1, toRow);
+    if (toRow == row && toCol == col) return true;
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<SidTable> (this), toRow, toCol]
+    {
+        if (safe == nullptr) return;
+        safe->finishEdit (false, false);
+        safe->goTo (toRow, toCol, true);
+    });
+    return true;
+}
+
+bool SidTable::keyPressed (const juce::KeyPress& k)
+{
+    const int row = table.getLastRowSelected();
+    if (k.getKeyCode() == juce::KeyPress::F2Key)   // like a spreadsheet: straight into the input phase, caret at the end
+    {
+        startEdit (row, isEditableCol (curCol) ? curCol : cTitle);
+        enterCaretMode();
+        return true;
+    }
+    if (editor != nullptr || row < 0 || rowEntry (row) == nullptr) return false;
+    if (navKey (k)) return true;
+    const auto code = k.getKeyCode();
+    const auto mods = k.getModifiers();
+    if ((code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey) && ! mods.isAnyModifierKeyDown())
+    {
+        goTo (row, nextCol (curCol, code == juce::KeyPress::leftKey ? -1 : 1, false), true);
+        return true;
+    }
+    if (code == juce::KeyPress::tabKey && ! mods.isCommandDown() && ! mods.isAltDown())
+    {
+        goTo (row, nextCol (curCol, mods.isShiftDown() ? -1 : 1, true), true);
+        return true;
+    }
+    // typing on an editable cell starts editing with that character (space stays play / pause)
+    const auto ch = k.getTextCharacter();
+    if (ch > ' ' && ! mods.isCommandDown() && ! mods.isAltDown() && isEditableCol (curCol) && ! rowEntry (row)->has (fMissing))
+    {
+        startEdit (row, curCol, juce::String::charToString (ch));
+        return true;
+    }
+    return false;
+}
+
+void SidTable::hideSuggestions()
+{
+    if (suggest != nullptr) suggest->setVisible (false);
+}
+
+void SidTable::updateSuggestions()
+{
+    if (editor == nullptr) { hideSuggestions(); return; }
+    const auto q = editor->getText().trim();
+    if (q.isEmpty() || editor->getText() == editOriginal) { hideSuggestions(); return; }
+    std::vector<std::pair<juce::String, int>> list;
+    for (auto& kv : knownValues)
+        if (kv.first.containsIgnoreCase (q) && kv.first != q) list.push_back (kv);
+    std::sort (list.begin(), list.end(), [&q] (const auto& a, const auto& b)
+    {
+        const bool sa = a.first.startsWithIgnoreCase (q), sb = b.first.startsWithIgnoreCase (q);
+        if (sa != sb) return sa;
+        return a.first.compareNatural (b.first) < 0;
+    });
+    if (list.empty()) { hideSuggestions(); return; }
+    if (suggest == nullptr) { suggest = std::make_unique<SuggestBox> (*this); addChildComponent (*suggest); }
+    suggest->items.clear();
+    for (size_t i = 0; i < list.size() && i < 12; ++i) suggest->items.add (list[i].first);
+    suggest->query = q;
+    suggest->selected = -1;
+    const auto er = getLocalArea (editor->getParentComponent(), editor->getBounds());
+    int w = juce::jmax (er.getWidth(), 240);
+    for (auto& s : suggest->items) w = juce::jmax (w, juce::jmin (520, juce::GlyphArrangement::getStringWidthInt (ui::font (13.0f, true), s) + 20));
+    const int h = suggest->items.size() * SuggestBox::rowH + 4;
+    auto r = juce::Rectangle<int> (er.getX(), er.getBottom() + 1, w, h);
+    if (r.getBottom() > getHeight()) r.setY (er.getY() - h - 1);
+    if (r.getRight() > getWidth()) r.setX (juce::jmax (0, getWidth() - w));
+    suggest->setBounds (r);
+    suggest->setVisible (true);
+    suggest->toFront (false);
+    suggest->repaint();
+}
+
+void SidTable::acceptSuggestion (int index)
+{
+    if (suggest == nullptr || editor == nullptr || index < 0 || index >= suggest->items.size()) return;
+    editor->setText (suggest->items[index], false);
+    hideSuggestions();
+    editorKey (juce::KeyPress (juce::KeyPress::returnKey));   // like Return: save and one row down
 }
 
 void SidTable::backgroundClicked (const juce::MouseEvent&) { table.deselectAllRows(); }

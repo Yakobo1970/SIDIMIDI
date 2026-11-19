@@ -24,6 +24,19 @@ public:
     juce::String title;
 };
 
+// live oscillator of one SID voice (the waveform the player synthesises), shown in the header
+class ScopeBox : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    ScopeBox (AudioPlayerEngine& e, int voiceIndex);
+    void paint (juce::Graphics&) override;
+private:
+    AudioPlayerEngine& engine;
+    int voice;
+    bool wasActive = false;
+    void timerCallback() override;
+};
+
 class MainComponent : public juce::Component, public juce::DragAndDropContainer, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
@@ -46,6 +59,7 @@ public:
     void addLoupeMenu (juce::PopupMenu& m, int firstId);   // ids firstId .. firstId+19
     void handleLoupeMenu (int r, int firstId);
     void showLoupeMenu();
+    void refreshHvscHint();                                 // a newer HVSC version was found (marks the settings button)
     void updateLoupe();
     void showLoupeAt (juce::Point<int> p);
     void selectTab (int index);                             // 0 = SID>MIDI, 1 = MIDI>SID
@@ -80,6 +94,7 @@ private:
     juce::SharedResourcePointer<UpdateCheck> updateCheck;
     ui::Look look;
     std::unique_ptr<AudioPlayerEngine> playerEngine;
+    std::unique_ptr<ScopeBox> scopes[3];
     juce::ThreadPool pool { 2 };
     std::unique_ptr<SidTab> sidPane;
     std::unique_ptr<MidiTab> midiPane;

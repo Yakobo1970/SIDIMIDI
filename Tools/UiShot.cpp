@@ -6,6 +6,7 @@
 #include "../Source/ScaleHost.h"
 #include "../Source/SidTab.h"
 #include "../Source/MidiTab.h"
+#include "../Source/AudioPlayerEngine.h"
 
 using namespace sm;
 
@@ -80,6 +81,18 @@ public:
                 return;
             }
             if (args.contains ("prime")) { host.createComponentSnapshot (host.getLocalBounds(), true, 1.0f); wait (arg ("prime").getIntValue()); }   // paints once so lazy content (miniatures) starts loading
+            if (const auto r = arg ("edit"); r.isNotEmpty())   // opens the cell editor: edit <row> <column id> [typed text]
+            {
+                main.sidTab().table().list().grabKeyboardFocus();
+                main.sidTab().table().startEdit (r.getIntValue(), arg ("edit", 2).getIntValue(), arg ("edit", 3).startsWith ("-") ? juce::String() : arg ("edit", 3));
+                wait (400);
+            }
+            if (const auto m = arg ("sound"); m.isNotEmpty())   // really plays the selected tune very quietly (oscillators in the header)
+            {
+                main.player().setOutputGain (0.03f);
+                main.sidTab().play (main.sidTab().selected(), 0);
+                wait (m.getIntValue());
+            }
             if (const auto p = arg ("play"); p.isNotEmpty()) main.sidTab().view().setPlayFrame (p.getIntValue());
             if (args.contains ("about")) main.showAbout (true);
             if (args.contains ("tips")) { main.showAbout (true); }

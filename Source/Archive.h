@@ -97,6 +97,22 @@ public:
     bool isInsideFolders (const juce::File& f) const;
     int duplicateCount() const { return duplicates; }
 
+    // ---- editing the SID header (title, author, released) - writes into the file, keeps the original once, can be undone
+    enum SidField { fieldTitle = 0, fieldAuthor = 1, fieldReleased = 2 };
+    bool setSidField (Entry& e, int field, const juce::String& value, juce::String& err, bool record = true);
+    juce::File backupFolder() const { return dataFolder().getChildFile ("Sicherung"); }
+    juce::String protectedMessage() const;
+    // everything written inside one group is undone together
+    struct UndoGroup
+    {
+        UndoGroup (Archive& a, const juce::String& label);
+        ~UndoGroup();
+        Archive& arch;
+    };
+    bool canUndo() const { return ! undoStack.empty(); }
+    juce::String undoLabel() const { return undoStack.empty() ? juce::String() : undoStack.back().label; }
+    int undo (juce::String& failed);                                        // returns the number of restored values
+
     // ---- persistence
     juce::File dataFolder() const;
     juce::File settingsFile() const;
@@ -116,6 +132,11 @@ private:
     bool dirty = false, settingsDirty = false;
     int saveCountdown = 0;
     int duplicates = 0;
+
+    struct UndoItem { juce::String path; int field = 0; juce::String oldValue; };
+    struct UndoStep { juce::String label; std::vector<UndoItem> items; };
+    std::vector<UndoStep> undoStack;
+    int groupDepth = 0;
 
     std::unique_ptr<Scanner> scanner;
     juce::CriticalSection pendingLock;

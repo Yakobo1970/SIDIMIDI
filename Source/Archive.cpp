@@ -1,4 +1,5 @@
 #include "Archive.h"
+#include "Lang.h"
 #include <unordered_set>
 
 namespace sm
@@ -561,6 +562,91 @@ Entry* Archive::addFile (const juce::File& f)
     dirty = true;
     changed();
     return byPath (path);
+}
+
+// ---- editing the header
+juce::String Archive::protectedMessage() const { return T ("Der Ordner ist schreibgeschützt"); }
+
+Archive::UndoGroup::UndoGroup (Archive& a, const juce::String& label) : arch (a)
+{
+    if (arch.groupDepth++ == 0) arch.undoStack.push_back ({ label, {} });
+}
+
+Archive::UndoGroup::~UndoGroup()
+{
+    if (--arch.groupDepth == 0 && ! arch.undoStack.empty() && arch.undoStack.back().items.empty()) arch.undoStack.pop_back();
+}
+
+bool Archive::setSidField (Entry& e, int field, const juce::String& valueIn, juce::String& err, bool record)
+{
+    if (field < 0 || field > 2) { err = "?"; return false; }
+    if (e.has (fProtected)) { err = protectedMessage(); return false; }
+    const juce::File file (e.path);
+    juce::MemoryBlock mb;
+    if (! file.loadFileAsData (mb) || mb.getSize() < 0x76) { err = T ("Die Datei lässt sich nicht lesen"); return false; }
+    auto* d = (juce::uint8*) mb.getData();
+    if (std::memcmp (d, "PSID", 4) != 0 && std::memcmp (d, "RSID", 4) != 0) { err = T ("Kein SID-Kopf"); return false; }
+    const auto value = valueIn.trim();
+    if (value.length() > 32) { err = T ("Höchstens 32 Zeichen"); return false; }
+    for (auto c = value.getCharPointer(); ! c.isEmpty();)
+        if (c.getAndAdvance() > 255) { err = T ("Nur Zeichen des Latin-1-Zeichensatzes (kein Euro-Zeichen, keine asiatischen Zeichen)"); return false; }
+    const size_t pos = (size_t) (22 + 32 * field);
+    juce::String oldValue;
+    {
+        int len = 0;
+        while (len < 32 && d[pos + (size_t) len] != 0) ++len;
+        juce::String s;
+        for (int i = 0; i < len; ++i) s += juce::String::charToString ((juce::juce_wchar) d[pos + (size_t) i]);
+        oldValue = s;
+    }
+    if (oldValue == value) return true;
+
+    // the original of a file is kept once
+    const auto backup = backupFolder().getChildFile (juce::String::toHexString (file.getFullPathName().hashCode64()) + "_" + file.getFileName());
+    if (! backup.existsAsFile()) { backupFolder().createDirectory(); file.copyFileTo (backup); }
+
+    for (int i = 0; i < 32; ++i) d[pos + (size_t) i] = 0;
+    {
+        int i = 0;
+        for (auto c = value.getCharPointer(); ! c.isEmpty(); ++i) d[pos + (size_t) i] = (juce::uint8) c.getAndAdvance();
+    }
+    if (! file.replaceWithData (mb.getData(), mb.getSize())) { err = T ("Schreiben nicht möglich (Datei schreibgeschützt oder gesperrt?)"); return false; }
+
+    if (record)
+    {
+        const bool own = groupDepth == 0;
+        if (own) undoStack.push_back ({ T ("%1: %2", field == 0 ? T ("Titel") : field == 1 ? T ("Autor") : T ("Veröffentlicht"), e.name), {} });
+        undoStack.back().items.push_back ({ e.path, field, oldValue });
+        while (undoStack.size() > 200) undoStack.erase (undoStack.begin());
+    }
+
+    // read the entry again (the lengths belong to the old content hash: keep them)
+    const auto si = parseSidFile (file, false);
+    auto hv = hvscFor (e.path);
+    auto ne = makeEntry (file, si, hv.get());
+    if (ne->lengths.empty()) { ne->lengths = e.lengths; ne->seconds = e.seconds; }
+    markProtection (*ne, protectedFolders());
+    insertOrReplace (std::move (ne));
+    markSameContent();
+    dirty = true;          // no changed(): the table keeps its order while the user types on
+    return true;
+}
+
+int Archive::undo (juce::String& failed)
+{
+    if (undoStack.empty()) return 0;
+    auto step = std::move (undoStack.back());
+    undoStack.pop_back();
+    int n = 0;
+    for (size_t i = step.items.size(); i-- > 0;)
+    {
+        auto& it = step.items[i];
+        auto* e = byPath (it.path);
+        juce::String err;
+        if (e != nullptr && setSidField (*e, it.field, it.oldValue, err, false)) ++n;
+        else failed << it.path << ": " << err << "\n";
+    }
+    return n;
 }
 
 // ---- persistence

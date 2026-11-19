@@ -72,8 +72,10 @@ public:
     void addFolderDialog();
     void startScanAll();
     void showFolderMenu();
-    void showHvscMenu();
+    void showHvscMenu();                // the HVSC window (from the settings menu)
+    int hvscNewestVersion() const { return hvscNewest; }   // 0 = none known
     void focusSearch();
+    void undoEdit();                    // Ctrl + Z: takes back the last change of title / author / released
 
     SidTable& table() { return list; }
     SidView& view() { return graph; }
@@ -90,9 +92,9 @@ private:
     SidView graph;
     DragBar dragBar;
     PositionBar position;
-    juce::TextButton folders, scan, hvscBtn, playBtn, stopBtn, filterBtn, ratingBtn, clearFilters, zoomReset;
+    juce::TextButton folders, scan, playBtn, stopBtn, filterBtn, ratingBtn, clearFilters, zoomReset;
     juce::ToggleButton onlyFav;
-    RepeatButton autoNext;
+    RepeatButton repeatBtn;                  // repeat the single tune
     juce::TextEditor search, info;
     juce::ComboBox songBox;
     juce::Label emptyHint, songLabel;

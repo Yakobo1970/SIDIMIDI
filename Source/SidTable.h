@@ -40,7 +40,7 @@ struct Landscape
     std::array<std::vector<juce::uint8>, 3> height;   // per voice and time bucket: 0 = silent, 1 … 255 = relative pitch
 };
 
-class SidTable : public juce::Component, private juce::TableListBoxModel, private juce::Timer
+class SidTable : public juce::Component, private juce::TableListBoxModel, private juce::Timer, private juce::TextEditor::Listener
 {
 public:
     explicit SidTable (Archive& a);
@@ -75,6 +75,16 @@ public:
     void restoreLayout (const juce::String& s);
     void showPlayingRow (int id) { playingId = id; table.repaint(); }
 
+    // ---- inline editing of title, author and released (written into the SID header), like in Midi-Fundus
+    std::function<void()> onEdited;                                     // a value was written
+    std::function<void (const juce::String&)> onStatus;
+    bool isEditing() const { return editor != nullptr; }
+    void startEdit (int row, int col, const juce::String& typed = {});
+    void finishEdit (bool commit, bool toSelection = true);
+    bool isEditableCol (int col) const;
+    void copyValueToSelection (int col, const Entry& from);   // "apply to all selected"
+    bool keyPressed (const juce::KeyPress&) override;
+
     void resized() override;
     void paint (juce::Graphics&) override;
 
@@ -91,6 +101,44 @@ private:
     bool sortForward = true;
     int playingId = 0;
     int lastSelectedId = 0;
+
+    // editing
+    struct CellEditor;
+    struct SuggestBox;
+    std::unique_ptr<juce::TextEditor> editor;
+    std::unique_ptr<SuggestBox> suggest;
+    std::vector<std::pair<juce::String, int>> knownValues;
+    juce::String editOriginal;
+    int editId = 0, editCol = 0, curCol = cTitle;
+    bool caretMode = false;
+    int pendingId = 0, pendingCol = 0;
+    struct ClickTimer : juce::Timer { std::function<void()> cb; void timerCallback() override { stopTimer(); if (cb) cb(); } } clickTimer;
+    bool navKey (const juce::KeyPress&);
+    struct NavKeys : juce::KeyListener
+    {
+        explicit NavKeys (SidTable& o) : owner (o) {}
+        SidTable& owner;
+        bool keyPressed (const juce::KeyPress& k, juce::Component*) override { return owner.navKey (k); }
+    } navKeys { *this };
+    int rowOfId (int id) const { return rowOf (id); }
+    int nextCol (int col, int dir, bool editableOnly) const;
+    void scrollToColumn (int col);
+    void goTo (int row, int col, bool edit);
+    bool canEdit (int row, int col) const;
+    bool editorKey (const juce::KeyPress&);
+    void enterCaretMode();
+    int pageRows() const { return juce::jmax (1, table.getHeight() / juce::jmax (1, table.getRowHeight()) - 2); }
+    void startPendingEdit();
+    juce::String rawValue (const Entry& e, int col) const;
+    void applyValue (const std::vector<int>& ids, int col, const juce::String& value);
+    void updateSuggestions();
+    void hideSuggestions();
+    void acceptSuggestion (int index);
+    void textEditorReturnKeyPressed (juce::TextEditor&) override { finishEdit (true); }
+    void textEditorEscapeKeyPressed (juce::TextEditor&) override;
+    void textEditorFocusLost (juce::TextEditor&) override;
+    void textEditorTextChanged (juce::TextEditor&) override { updateSuggestions(); }
+
     bool inRefresh = false, masksChanged = false;
     void* watcher = nullptr;   // HeaderWatcher (SidTable.cpp)
 

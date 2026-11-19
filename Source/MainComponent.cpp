@@ -32,11 +32,67 @@ void TabButton::paintButton (juce::Graphics& g, bool over, bool down)
     g.drawFittedText (getButtonText(), getLocalBounds().reduced (6, 0), juce::Justification::centred, 1);
 }
 
+// ================================================================================================ oscillators
+ScopeBox::ScopeBox (AudioPlayerEngine& e, int voiceIndex) : engine (e), voice (voiceIndex)
+{
+    startTimerHz (30);
+}
+
+void ScopeBox::timerCallback()
+{
+    AudioPlayerEngine::VoiceDisplayInfo info[3];
+    engine.getVoiceDisplaySnapshot (info);
+    const bool active = info[voice].active;
+    if (active || wasActive) repaint();
+    wasActive = active;
+}
+
+void ScopeBox::paint (juce::Graphics& g)
+{
+    auto* l = dynamic_cast<ui::Look*> (&getLookAndFeel());
+    const auto& th = l != nullptr ? l->theme() : themes()[0];
+    const bool light = th.bg.getBrightness() > 0.5f;
+    const auto vc = voiceColour (voice, light);
+    auto r = getLocalBounds().toFloat();
+    g.setColour (light ? th.panel2 : juce::Colours::black.withAlpha (0.38f));
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (vc.withAlpha (0.55f));
+    g.fillRoundedRectangle (juce::Rectangle<float> (r.getX(), r.getY() + 4.0f, 3.0f, r.getHeight() - 8.0f), 1.5f);
+    g.setColour (vc.withAlpha (0.9f));
+    g.setFont (ui::font (10.5f, true));
+    g.drawText (juce::String (voice + 1), r.toNearestInt().withTrimmedLeft (7).withHeight (12), juce::Justification::topLeft, false);
+
+    AudioPlayerEngine::VoiceDisplayInfo info[3];
+    engine.getVoiceDisplaySnapshot (info);
+    const auto& v = info[voice];
+    auto plot = r.reduced (4.0f, 3.0f).withTrimmedLeft (4.0f);
+    if (! v.active)
+    {
+        g.setColour (th.dim.withAlpha (0.35f));
+        g.drawHorizontalLine ((int) plot.getCentreY(), plot.getX(), plot.getRight());
+        return;
+    }
+    // the level of the envelope sets the brightness; the line is the waveform of the last few milliseconds
+    g.setColour (vc.withAlpha (0.35f + 0.65f * juce::jlimit (0.0f, 1.0f, v.envelopeLevel * 1.3f)));
+    juce::Path p;
+    const int n = AudioPlayerEngine::kOscHistorySize;
+    for (int i = 0; i < n; ++i)
+    {
+        const int idx = (v.oscHistoryWritePos + i) % n;
+        const float sample = juce::jlimit (-1.0f, 1.0f, v.oscHistory[(size_t) idx]);
+        const float x = plot.getX() + plot.getWidth() * (float) i / (float) (n - 1);
+        const float y = plot.getCentreY() - sample * plot.getHeight() * 0.46f;
+        if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+    }
+    g.strokePath (p, juce::PathStrokeType (1.5f));
+}
+
 // ================================================================================================ main component
 MainComponent::MainComponent()
 {
     initLanguage (arch->settings);
     playerEngine = std::make_unique<AudioPlayerEngine>();
+    for (int v = 0; v < 3; ++v) { scopes[v] = std::make_unique<ScopeBox> (*playerEngine, v); addAndMakeVisible (*scopes[v]); }
     iconImage = juce::ImageFileFormat::loadFrom (BinaryData::icon_png, (size_t) BinaryData::icon_pngSize);
     bannerImage = juce::ImageFileFormat::loadFrom (BinaryData::banner_png, (size_t) BinaryData::banner_pngSize);
 
@@ -99,6 +155,7 @@ MainComponent::~MainComponent()
     overlay.reset();
     sidPane.reset();
     midiPane.reset();
+    for (auto& s : scopes) s.reset();
     playerEngine.reset();
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
@@ -121,6 +178,13 @@ void MainComponent::applyTheme()
     repaint();
 }
 
+void MainComponent::refreshHvscHint()
+{
+    const int n = sidPane != nullptr ? sidPane->hvscNewestVersion() : 0;
+    settingsBtn.setButtonText (n > 0 ? T ("Einstellungen") + juce::String::fromUTF8 (" ▲") : T ("Einstellungen"));
+    settingsBtn.setTooltip (n > 0 ? T ("Neue HVSC-Version verfügbar: #%1 – unter „HVSC-Sammlung aktualisieren …“", n) : T ("Farbthema, Sprache, Skalierung, Lupe, Updates"));
+}
+
 void MainComponent::applyLanguage()
 {
     settingsBtn.setButtonText (T ("Einstellungen"));
@@ -128,12 +192,13 @@ void MainComponent::applyLanguage()
     tabMidi.setButtonText ("MIDI>SID");
     tabSid.setTooltip (T ("SID-Archiv: Datenbank der SID-Dateien, Ablauf der Tunes, HVSC, Konvertierung nach MIDI"));
     tabMidi.setTooltip (T ("MIDI-Ordner öffnen und einzelne MIDI-Dateien nach SID konvertieren"));
-    settingsBtn.setTooltip (T ("Farbthema, Sprache, Skalierung, Lupe, Updates"));
     aboutBtn.setTooltip (T ("Über SIDiMIDI, Spenden und Tooltipps"));
+    for (auto& s : scopes) if (s != nullptr) s->setTooltip (T ("Oszillatoren der drei SID-Stimmen (live beim Abspielen)"));
     shownUpdate = "-";
     refreshUpdateHint();
     if (sidPane != nullptr) sidPane->applyLanguage();
     if (midiPane != nullptr) midiPane->applyLanguage();
+    refreshHvscHint();
     overlay.reset();
     resized();
     repaint();
@@ -290,6 +355,17 @@ void MainComponent::resized()
     aboutBtn.setBounds (h.removeFromRight (34)); h.removeFromRight (6);
     settingsBtn.setBounds (h.removeFromRight (120)); h.removeFromRight (12);
     if (updateBtn.isVisible()) updateBtn.setBounds (h.removeFromRight (juce::jmin (210, h.getWidth() / 3)));
+    // the three oscillators sit behind the tabs, as far as there is room
+    h.removeFromLeft (16);
+    {
+        const int gap = 6, avail = h.getWidth() - 10;
+        const int w = juce::jmin (190, (avail - 2 * gap) / 3);
+        for (int v = 0; v < 3; ++v)
+        {
+            scopes[v]->setVisible (w >= 70);
+            if (w >= 70) scopes[v]->setBounds (h.removeFromLeft (w)), h.removeFromLeft (gap);
+        }
+    }
     statusArea = r.removeFromBottom (26);
     contentArea = r;
     sidPane->setBounds (r);
@@ -413,6 +489,10 @@ void MainComponent::showSettingsMenu()
     addLoupeMenu (loupeMenu, 900);
     m.addSubMenu (T ("Lupe (Rechtsklick in einen freien Bereich)"), loupeMenu);
     m.addSeparator();
+    {
+        const int newest = sidPane->hvscNewestVersion();
+        m.addItem (21, newest > 0 ? T ("HVSC-Sammlung aktualisieren … (neu: #%1)", newest) : T ("HVSC-Sammlung prüfen und aktualisieren …"));
+    }
     m.addItem (20, T ("Alle SID-Dateien neu einlesen (auch unveränderte)"), ! arch->isScanning());
     m.addItem (22, T ("Spaltenanordnung zurücksetzen"));
     m.addItem (23, T ("Einmal am Tag nach Updates suchen (GitHub)"), true, updateCheck->enabled());
@@ -433,6 +513,7 @@ void MainComponent::showSettingsMenu()
         else if (r == 491) safe->setUiScaleSetting (juce::jlimit (0.5, 3.0, safe->currentScale() / 1.1));
         else if (r >= 900 && r < 920) safe->handleLoupeMenu (r, 900);
         else if (r == 20) a.startScan (true);
+        else if (r == 21) safe->sidPane->showHvscMenu();
         else if (r == 22)
         {
             a.settings.removeProperty ("columns", nullptr);

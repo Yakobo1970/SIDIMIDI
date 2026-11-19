@@ -77,13 +77,12 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     addAndMakeVisible (songBox);
     addAndMakeVisible (songLabel);
     addAndMakeVisible (emptyHint);
-    for (auto* b : { &folders, &scan, &hvscBtn, &playBtn, &stopBtn, &filterBtn, &ratingBtn, &clearFilters, &zoomReset }) addAndMakeVisible (b);
+    for (auto* b : { &folders, &scan, &playBtn, &stopBtn, &filterBtn, &ratingBtn, &clearFilters, &zoomReset }) addAndMakeVisible (b);
     addAndMakeVisible (onlyFav);
-    addAndMakeVisible (autoNext);
+    addAndMakeVisible (repeatBtn);
     addAndMakeVisible (search);
     playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
     stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
-    hvscBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3b6fd6));
     search.setFont (font (14.0f));
     search.setIndents (6, 4);
     search.onTextChange = [this] { list.setGlobalSearch (search.getText()); updateButtons(); };
@@ -100,7 +99,6 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
 
     folders.onClick = [this] { showFolderMenu(); };
     scan.onClick = [this] { if (arch.isScanning()) arch.stopScan(); else startScanAll(); updateButtons(); };
-    hvscBtn.onClick = [this] { showHvscMenu(); };
     playBtn.onClick = [this] { togglePlay(); };
     stopBtn.onClick = [this] { stopPlayback(); };
     filterBtn.onClick = [this] { showFilterMenu(); };
@@ -112,14 +110,16 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     };
     zoomReset.onClick = [this] { graph.resetZoom(); };
     onlyFav.onClick = [this] { list.setOnlyFavourites (onlyFav.getToggleState()); updateButtons(); };
-    autoNext.setToggleState ((bool) arch.settings.getProperty ("autoNext", true), juce::dontSendNotification);
-    autoNext.onClick = [this] { arch.settings.setProperty ("autoNext", autoNext.getToggleState(), nullptr); arch.settingsChanged(); };
+    repeatBtn.setToggleState ((bool) arch.settings.getProperty ("repeatTune", false), juce::dontSendNotification);
+    repeatBtn.onClick = [this] { arch.settings.setProperty ("repeatTune", repeatBtn.getToggleState(), nullptr); arch.settingsChanged(); };
     songBox.onChange = [this] { onSongChosen(); };
 
     list.onSelect = [this] (Entry* e) { onSelectionChanged (e); };
     list.onPlay = [this] (Entry* e) { play (e, 0); };
     list.onMenu = [this] (Entry& e, int col, juce::Point<int> p) { showEntryMenu (e, col, p); };
     list.onListChanged = [this] { updateEmptyHint(); updateButtons(); };
+    list.onStatus = [this] (const juce::String& s) { main.setStatus (s); };
+    list.onEdited = [this] { updateInfo (selected()); };
 
     graph.onSeek = [this] (juce::uint32 frame)
     {
@@ -194,7 +194,6 @@ void SidTab::applyLanguage()
 {
     folders.setButtonText (T ("Ordner"));
     scan.setButtonText (arch.isScanning() ? T ("Stopp") : T ("Einlesen"));
-    hvscBtn.setButtonText (hvscNewest > 0 ? juce::String::fromUTF8 ("HVSC ▲") : juce::String ("HVSC"));
     filterBtn.setButtonText (T ("Filter"));
     ratingBtn.setButtonText (juce::String::fromUTF8 ("★"));
     clearFilters.setButtonText (T ("Filter löschen"));
@@ -204,14 +203,12 @@ void SidTab::applyLanguage()
     search.setTextToShowWhenEmpty (T ("Suche in Titel, Autor, Komponist, Pfad …"), juce::Colours::grey);
     folders.setTooltip (T ("SID-Ordner hinzufügen, entfernen oder schreibschützen (Ordner lassen sich auch ins Fenster ziehen)"));
     scan.setTooltip (T ("Alle Ordner einlesen – neue und geänderte SID-Dateien werden in die Datenbank aufgenommen"));
-    hvscBtn.setTooltip (hvscNewest > 0 ? T ("Neue HVSC-Version verfügbar: #%1. Klicken zum Aktualisieren.", hvscNewest)
-                                       : T ("High Voltage SID Collection: Version, Update-Prüfung und Aktualisierung"));
     playBtn.setTooltip (T ("Markierten Tune abspielen / pausieren (Leertaste)"));
     stopBtn.setTooltip (T ("Stopp"));
     filterBtn.setTooltip (T ("Nach Herkunft und Besonderheiten filtern"));
     ratingBtn.setTooltip (T ("Nur Tunes ab einer Mindestbewertung zeigen"));
     onlyFav.setTooltip (T ("Nur Favoriten zeigen"));
-    autoNext.setTooltip (T ("Wiederholen: nach dem Ende eines Tunes den nächsten der Liste spielen, am Listenende wieder von vorn"));
+    repeatBtn.setTooltip (T ("Dieses Stück wiederholen. Ohne Wiederholen geht es mit dem nächsten der Liste weiter – am Listenende wieder von vorn"));
     position.setTooltip (T ("Position im Tune (Klick oder Ziehen springt)"));
     zoomReset.setTooltip (T ("Zoom zurücksetzen (Strg + Mausrad zoomt, Doppelklick in der Darstellung ebenfalls)"));
     clearFilters.setTooltip (T ("Alle Suchfelder und Filter leeren"));
@@ -249,6 +246,18 @@ void SidTab::updateEmptyHint()
         : T ("Noch keine SID-Dateien in der Datenbank. „Einlesen“ klicken."), juce::dontSendNotification);
 }
 
+void SidTab::undoEdit()
+{
+    list.finishEdit (false);
+    if (! arch.canUndo()) { main.setStatus (T ("Nichts zum Rückgängigmachen")); return; }
+    const auto label = arch.undoLabel();
+    juce::String failed;
+    arch.undo (failed);
+    list.list().repaint();
+    updateInfo (selected());
+    main.setStatus (failed.isEmpty() ? T ("Rückgängig gemacht: %1", label) : T ("Nicht alles zurückgesetzt:") + " " + failed.substring (0, 200));
+}
+
 void SidTab::focusSearch() { search.grabKeyboardFocus(); search.selectAll(); }
 
 // ---- layout
@@ -259,7 +268,7 @@ void SidTab::resized()
     auto h = toolbarArea.reduced (10, 7);
     folders.setBounds (h.removeFromLeft (76)); h.removeFromLeft (6);
     scan.setBounds (h.removeFromLeft (92)); h.removeFromLeft (6);
-    hvscBtn.setBounds (h.removeFromLeft (70)); h.removeFromLeft (14);
+    h.removeFromLeft (8);
     const bool compact = h.getWidth() < 640;
     onlyFav.setButtonText (compact ? juce::String::fromUTF8 ("♥") : juce::String::fromUTF8 ("♥ ") + T ("Nur Favoriten"));
     onlyFav.setBounds (h.removeFromRight (compact ? 44 : 140)); h.removeFromRight (6);
@@ -286,7 +295,7 @@ void SidTab::resized()
     // transport: play / pause, stop, repeat and the position with the time
     playBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
     stopBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
-    autoNext.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (10);
+    repeatBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (10);
     position.setBounds (gh.removeFromLeft (juce::jlimit (120, 420, gh.getWidth())));
     infoWidth = juce::jlimit (260, 520, bottom.getWidth() * 3 / 10);
     auto infoArea = bottom.removeFromRight (infoWidth);
@@ -510,6 +519,7 @@ void SidTab::timerCallback()
                     if (safe == nullptr || newest <= local) return;
                     safe->hvscNewest = newest;
                     safe->applyLanguage();
+                    safe->main.refreshHvscHint();
                 });
             });
         }
@@ -522,8 +532,13 @@ void SidTab::timerCallback()
         position.repaint();
         if (pl.takeSidFinished())
         {
-            if (autoNext.getToggleState()) playNext (1, true);
-            else stopPlayback();
+            if (repeatBtn.getToggleState())      // repeat: the same tune once more
+            {
+                auto* e = arch.byId (playingId);
+                const int song = playingSong;
+                if (e != nullptr) play (e, song); else stopPlayback();
+            }
+            else playNext (1, true);              // otherwise the next one; the list starts again from the top at its end
         }
     }
     if (arch.isScanning() || scan.getButtonText() != (arch.isScanning() ? T ("Stopp") : T ("Einlesen"))) updateButtons();
@@ -658,7 +673,7 @@ void SidTab::showRatingMenu()
 }
 
 // ---- context menu
-void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
+void SidTab::showEntryMenu (Entry& clicked, int col, juce::Point<int> screen)
 {
     auto targets = list.selectedEntries();
     if (std::find (targets.begin(), targets.end(), &clicked) == targets.end()) { list.selectRow (list.rowOf (clicked.id)); targets = { &clicked }; }
@@ -703,6 +718,21 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
     m.addSubMenu (T ("Nach MIDI konvertieren"), conv, playable);
     m.addSeparator();
 
+    {
+        juce::PopupMenu::Item u (arch.canUndo() ? T ("Rückgängig: %1", arch.undoLabel()) : T ("Rückgängig"));
+        u.itemID = 450;
+        u.isEnabled = arch.canUndo();
+        u.shortcutKeyDescription = T ("Strg+Z");
+        m.addItem (u);
+    }
+    if (list.isEditableCol (col))
+    {
+        const bool canEdit = ! clicked.has (fMissing) && ! anyProtected;
+        m.addItem (451, T ("%1 bearbeiten", T (colDef (col).name)), canEdit);
+        if (targets.size() > 1) m.addItem (452, T ("„%1“ auf alle %2 markierten übertragen", cellText (clicked, col), (int) targets.size()), canEdit);
+    }
+    m.addSeparator();
+
     juce::PopupMenu rate;
     for (int i = 0; i <= 5; ++i)
         rate.addItem (400 + i, i == 0 ? T ("Keine Bewertung") : juce::String::repeatedString (juce::String::fromUTF8 ("★"), i), true, clicked.rating == i);
@@ -733,7 +763,7 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
 
     juce::Component::SafePointer<SidTab> safe (this);
     const int id = clicked.id;
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (juce::Rectangle<int> (screen.x, screen.y, 1, 1)), [safe, id, targets, q] (int r)
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (juce::Rectangle<int> (screen.x, screen.y, 1, 1)), [safe, id, targets, q, col] (int r)
     {
         if (safe == nullptr || r == 0) return;
         auto& t = *safe;
@@ -750,6 +780,14 @@ void SidTab::showEntryMenu (Entry& clicked, int, juce::Point<int> screen)
             case 299: t.convertToMidi ({ e }, -1); break;
             case 349: t.saveMidiInto ({ e }); break;
             case 410: t.arch.setFavourite (*e, ! e->favourite); break;
+            case 450: t.undoEdit(); break;
+            case 451: t.list.startEdit (t.list.rowOf (e->id), col); break;
+            case 452:
+            {
+                // the value of the clicked cell goes to all selected files
+                t.list.copyValueToSelection (col, *e);
+                break;
+            }
             case 500: juce::File (e->path).revealToUser(); break;
             case 501: juce::SystemClipboard::copyTextToClipboard (e->path); break;
             case 502: t.renameEntry (*e); break;
@@ -967,6 +1005,7 @@ bool SidTab::handleKey (const juce::KeyPress& k)
     if (k == juce::KeyPress::spaceKey && ! search.hasKeyboardFocus (true)) { togglePlay(); return true; }
     if (k == juce::KeyPress::escapeKey && ! search.hasKeyboardFocus (true)) { stopPlayback(); return true; }
     if (k == juce::KeyPress ('f', juce::ModifierKeys::ctrlModifier, 0)) { focusSearch(); return true; }
+    if (k == juce::KeyPress ('z', juce::ModifierKeys::ctrlModifier, 0)) { undoEdit(); return true; }
     if (k == juce::KeyPress::rightKey && k.getModifiers().isAltDown()) { playNext (1); return true; }
     if (k == juce::KeyPress::leftKey && k.getModifiers().isAltDown()) { playNext (-1); return true; }
     return false;

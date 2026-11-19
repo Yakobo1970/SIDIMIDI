@@ -197,6 +197,35 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    if (cmd == "edittest" && argc > 3)
+    {
+        // SidTest edittest <db-file> <folder with copies of SID files>: writes a title, reads it back, undoes it
+        _putenv_s ("SIDIMIDI_DB", argv[2]);
+        juce::MessageManager::getInstance();
+        Archive a;
+        a.addFolder (juce::File (juce::String::fromUTF8 (argv[3])));
+        a.startScan (true);
+        a.waitForScan();
+        if (a.entries().empty()) { out ("no entries"); return 1; }
+        auto& e = *a.entries().front();
+        const auto before = parseSidFile (juce::File (e.path), false);
+        juce::String err;
+        const bool ok = a.setSidField (e, Archive::fieldTitle, juce::String::fromUTF8 ("Neuer Titel äöü"), err);
+        const auto after = parseSidFile (juce::File (e.path), false);
+        out ("write " + juce::String ((int) ok) + " err '" + err + "' title '" + after.title + "' entry '" + e.title + "' md5 changed " + juce::String ((int) (after.md5 != before.md5)) + " songs " + juce::String (after.songs) + "/" + juce::String (before.songs) + " load " + juce::String ((int) (after.effLoad == before.effLoad)));
+        const bool ok2 = a.setSidField (e, Archive::fieldAuthor, juce::String::fromUTF8 ("€ nicht möglich"), err);
+        out ("euro: " + juce::String ((int) ok2) + " " + err);
+        const bool ok3 = a.setSidField (e, Archive::fieldReleased, "x123456789012345678901234567890123456", err);
+        out ("too long: " + juce::String ((int) ok3) + " " + err);
+        out ("undo available " + juce::String ((int) a.canUndo()) + " '" + a.undoLabel() + "'");
+        juce::String failed;
+        const int n = a.undo (failed);
+        const auto restored = parseSidFile (juce::File (e.path), false);
+        out ("undo " + juce::String (n) + " failed '" + failed + "' title '" + restored.title + "' md5 equal " + juce::String ((int) (restored.md5 == before.md5)));
+        out ("backup exists " + juce::String ((int) a.backupFolder().isDirectory()));
+        return 0;
+    }
+
     if (cmd == "tracesample" && argc > 2)
     {
         // SidTest tracesample <folder> [max]: emulates the start song of many files (10 s) and counts problems

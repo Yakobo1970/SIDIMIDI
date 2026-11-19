@@ -9,6 +9,8 @@ add_subdirectory(${JUCE_DIR} JUCE)
 
 # Everything without user interface (also used by the console test tool)
 set(SM_CORE
+    Source/Lang.cpp
+    Source/Texts.cpp
     Source/SidInfo.cpp
     Source/Hvsc.cpp
     Source/Archive.cpp
@@ -38,8 +40,6 @@ target_link_libraries(SidTest PRIVATE juce::juce_core juce::juce_events juce::ju
 # ------------------------------------------------------------------------------------------------
 # The application
 set(SM_UI
-    Source/Lang.cpp
-    Source/Texts.cpp
     Source/UpdateCheck.cpp
     Source/EmbeddedMiniplayer.cpp
     Source/SidTable.cpp
