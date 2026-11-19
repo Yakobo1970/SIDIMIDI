@@ -342,7 +342,7 @@ void SidView::paint (juce::Graphics& g)
             g.drawText (T ("Verlauf wird berechnet") + juce::String ("...").substring (0, dots), box, juce::Justification::centred);
         }
         else
-            g.drawFittedText (message.isNotEmpty() ? message : T ("Keine Datei markiert"), box.reduced (20), juce::Justification::centred, 3);
+            g.drawFittedText (message.isNotEmpty() ? TS (message) : T ("Keine Datei markiert"), box.reduced (20), juce::Justification::centred, 3);
         return;
     }
 
