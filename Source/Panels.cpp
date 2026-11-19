@@ -209,7 +209,7 @@ void HvscPanel::refreshInfo()
     }
     infoLines << T ("Installierte Version") << ":  #" << (h->version > 0 ? juce::String (h->version) : juce::String ("?"))
               << (h->versionDate.isNotEmpty() ? "   (" + h->versionDate + ")" : juce::String()) << "\n";
-    infoLines << T ("Ordner") << ":  " << h->root.getFullPathName() << "\n";
+    infoLines << T ("Sammlungsordner") << ":  " << h->root.getFullPathName() << "\n";
     infoLines << T ("%1 Songlängen · %2 STIL-Einträge · %3 Bug-Hinweise · %4 Musiker", h->lengthEntries(), h->stilEntries(), h->bugEntries(), h->musicianEntries()) << "\n";
     if (main.archive().isProtected (h->root.getFullPathName()))
         infoLines << T ("Der Ordner ist schreibgeschützt (Ordner-Menü). Updates sind gesperrt.") << "\n";
