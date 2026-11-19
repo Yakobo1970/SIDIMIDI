@@ -81,6 +81,20 @@ public:
                 return;
             }
             if (args.contains ("prime")) { host.createComponentSnapshot (host.getLocalBounds(), true, 1.0f); wait (arg ("prime").getIntValue()); }   // paints once so lazy content (miniatures) starts loading
+            if (args.contains ("tracker"))   // the tracker window: tracker <tune file or -> <row> <voice> [play]
+            {
+                main.openTracker();
+                if (auto* tw = main.trackerWindow())
+                {
+                    const auto f = arg ("tracker"), row = arg ("tracker", 2), voice = arg ("tracker", 3);
+                    tw->setupForTest (f == "-" ? juce::File() : juce::File (f), row.getIntValue(), voice.getIntValue(), arg ("tracker", 4) == "play", arg ("keys"), juce::File (arg ("export")));
+                    wait (arg ("tracker", 4) == "play" ? 1500 : 400);
+                    writePng (tw->createComponentSnapshot (tw->getLocalBounds(), true, 1.0f), out);
+                    main.setStatus ({});
+                }
+                quit();
+                return;
+            }
             if (const auto r = arg ("edit"); r.isNotEmpty())   // opens the cell editor: edit <row> <column id> [typed text]
             {
                 main.sidTab().table().list().grabKeyboardFocus();

@@ -93,7 +93,7 @@ private:
     DragBar dragBar;
     PositionBar position;
     juce::TextButton folders, scan, playBtn, stopBtn, filterBtn, ratingBtn, clearFilters, zoomReset;
-    juce::ToggleButton onlyFav;
+    juce::TextButton onlyFav, trackerBtn;     // only the heart (favourites) and the green tracker button
     RepeatButton repeatBtn;                  // repeat the single tune
     juce::TextEditor search, info;
     juce::ComboBox songBox;

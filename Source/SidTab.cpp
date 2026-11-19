@@ -79,6 +79,13 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     addAndMakeVisible (emptyHint);
     for (auto* b : { &folders, &scan, &playBtn, &stopBtn, &filterBtn, &ratingBtn, &clearFilters, &zoomReset }) addAndMakeVisible (b);
     addAndMakeVisible (onlyFav);
+    addAndMakeVisible (trackerBtn);
+    onlyFav.setClickingTogglesState (true);
+    onlyFav.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffe0457b));
+    onlyFav.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    trackerBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
+    trackerBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    trackerBtn.onClick = [this] { main.openTracker(); };
     addAndMakeVisible (repeatBtn);
     addAndMakeVisible (search);
     playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
@@ -207,7 +214,9 @@ void SidTab::applyLanguage()
     ratingBtn.setButtonText (juce::String::fromUTF8 ("★"));
     clearFilters.setButtonText (T ("Filter löschen"));
     zoomReset.setButtonText (T ("Ganz sehen"));
-    onlyFav.setButtonText (juce::String::fromUTF8 ("♥ ") + T ("Nur Favoriten"));
+    onlyFav.setButtonText (juce::String::fromUTF8 ("♥"));
+    trackerBtn.setButtonText (T ("Tracker"));
+    trackerBtn.setTooltip (T ("Tracker-Fenster: Tunes im Stil des JCH-NewPlayer-Editors komponieren, laden und als SID oder MIDI ausgeben"));
     songLabel.setText (T ("Song:"), juce::dontSendNotification);
     search.setTextToShowWhenEmpty (T ("Suche in Titel, Autor, Komponist, Pfad …"), juce::Colours::grey);
     folders.setTooltip (T ("SID-Ordner hinzufügen, entfernen oder schreibschützen (Ordner lassen sich auch ins Fenster ziehen)"));
@@ -278,11 +287,10 @@ void SidTab::resized()
     folders.setBounds (h.removeFromLeft (76)); h.removeFromLeft (6);
     scan.setBounds (h.removeFromLeft (92)); h.removeFromLeft (6);
     h.removeFromLeft (8);
-    const bool compact = h.getWidth() < 640;
-    onlyFav.setButtonText (compact ? juce::String::fromUTF8 ("♥") : juce::String::fromUTF8 ("♥ ") + T ("Nur Favoriten"));
-    onlyFav.setBounds (h.removeFromRight (compact ? 44 : 140)); h.removeFromRight (6);
-    ratingBtn.setBounds (h.removeFromRight (64)); h.removeFromRight (6);
-    filterBtn.setBounds (h.removeFromRight (70)); h.removeFromRight (8);
+    trackerBtn.setBounds (h.removeFromRight (86)); h.removeFromRight (6);
+    onlyFav.setBounds (h.removeFromRight (34)); h.removeFromRight (6);
+    ratingBtn.setBounds (h.removeFromRight (44)); h.removeFromRight (6);
+    filterBtn.setBounds (h.removeFromRight (62)); h.removeFromRight (8);
     search.setBounds (h);
 
     auto status = r.removeFromBottom (0);

@@ -18,7 +18,8 @@ set(SM_CORE
     Source/SidTrace.cpp
     Source/SevenZip.cpp
     Source/Ppmd7.cpp
-    Source/HvscUpdate.cpp)
+    Source/HvscUpdate.cpp
+    Source/NpTune.cpp)
 
 set(SM_DEFS
     JUCE_WEB_BROWSER=0
@@ -47,9 +48,10 @@ set(SM_UI
     Source/SidTab.cpp
     Source/MidiTab.cpp
     Source/Panels.cpp
+    Source/Tracker.cpp
     Source/MainComponent.cpp)
 
-juce_add_binary_data(SidBinary SOURCES Resources/icon.png Resources/banner.png)
+juce_add_binary_data(SidBinary SOURCES Resources/icon.png Resources/banner.png Resources/np_v20g4.prg)
 
 juce_add_gui_app(SIDIMIDI
     PRODUCT_NAME "SIDiMIDI"

@@ -155,6 +155,7 @@ MainComponent::~MainComponent()
     overlay.reset();
     sidPane.reset();
     midiPane.reset();
+    tracker.reset();
     for (auto& s : scopes) s.reset();
     playerEngine.reset();
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
@@ -242,6 +243,25 @@ void MainComponent::chooseFolder (const juce::String& title, std::function<void 
                               if (rememberKey.isNotEmpty()) { safe->arch->settings.setProperty (rememberKey, f.getFullPathName(), nullptr); safe->arch->settingsChanged(); }
                               if (done) done (f);
                           });
+}
+
+void MainComponent::chooseOpenFile (const juce::String& title, const juce::File& start, const juce::String& pattern, std::function<void (const juce::File&)> done)
+{
+    chooser = std::make_unique<juce::FileChooser> (title, start, pattern, false);
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [safe = juce::Component::SafePointer<MainComponent> (this), done] (const juce::FileChooser& fc)
+                          {
+                              if (safe == nullptr) return;
+                              const auto f = fc.getResult();
+                              if (f.existsAsFile() && done) done (f);
+                          });
+}
+
+void MainComponent::openTracker()
+{
+    if (tracker != nullptr) { tracker->setVisible (true); tracker->toFront (true); return; }
+    tracker = std::make_unique<TrackerWindow> (*this);
+    tracker->onClosed = [this] { tracker.reset(); };
 }
 
 void MainComponent::chooseSaveFile (const juce::String& title, const juce::File& suggested, const juce::String& pattern, std::function<void (const juce::File&)> done)

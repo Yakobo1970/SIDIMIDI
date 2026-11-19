@@ -7,6 +7,7 @@
 #include "Lang.h"
 #include "UpdateCheck.h"
 #include "Panels.h"
+#include "Tracker.h"
 
 class AudioPlayerEngine;
 
@@ -59,6 +60,8 @@ public:
     void addLoupeMenu (juce::PopupMenu& m, int firstId);   // ids firstId .. firstId+19
     void handleLoupeMenu (int r, int firstId);
     void showLoupeMenu();
+    TrackerWindow* trackerWindow() { return tracker.get(); }
+    void openTracker();                                      // the tracker window (created on first use, then brought to the front)
     void refreshHvscHint();                                 // a newer HVSC version was found (marks the settings button)
     void updateLoupe();
     void showLoupeAt (juce::Point<int> p);
@@ -68,6 +71,7 @@ public:
     MidiTab& midiTab() { return *midiPane; }
     // folder dialog that also shows the files (pattern = which files are listed); the last folder is kept under rememberKey
     void chooseFolder (const juce::String& title, std::function<void (const juce::File&)> done, const juce::String& showPattern = "*", const juce::String& rememberKey = {});
+    void chooseOpenFile (const juce::String& title, const juce::File& start, const juce::String& pattern, std::function<void (const juce::File&)> done);
     void chooseSaveFile (const juce::String& title, const juce::File& suggested, const juce::String& pattern, std::function<void (const juce::File&)> done);
     void notifySettings() { arch->settingsChanged(); }
     void paintLogo (juce::Graphics&, juce::Rectangle<float>) const;
@@ -95,6 +99,7 @@ private:
     ui::Look look;
     std::unique_ptr<AudioPlayerEngine> playerEngine;
     std::unique_ptr<ScopeBox> scopes[3];
+    std::unique_ptr<TrackerWindow> tracker;
     juce::ThreadPool pool { 2 };
     std::unique_ptr<SidTab> sidPane;
     std::unique_ptr<MidiTab> midiPane;

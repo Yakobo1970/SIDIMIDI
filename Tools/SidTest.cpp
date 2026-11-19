@@ -12,6 +12,7 @@
 #include "../Source/HvscUpdate.h"
 #include "../Source/SidToMidiCore.h"
 #include "../Source/MidiToSidCore.h"
+#include "../Source/NpTune.h"
 #include <iostream>
 
 using namespace sm;
@@ -223,6 +224,80 @@ int main (int argc, char** argv)
         const auto restored = parseSidFile (juce::File (e.path), false);
         out ("undo " + juce::String (n) + " failed '" + failed + "' title '" + restored.title + "' md5 equal " + juce::String ((int) (restored.md5 == before.md5)));
         out ("backup exists " + juce::String ((int) a.backupFolder().isDirectory()));
+        return 0;
+    }
+
+    if (cmd == "npd64" && argc > 2)
+    {
+        // SidTest npd64 <disk.d64> [dump]: loads every worktune of the disk, checks the round trip and plays it in the emulator
+        std::vector<NpD64File> files;
+        const juce::File img (juce::String::fromUTF8 (argv[2]));
+        if (! npD64List (img, files)) { out ("not a d64"); return 1; }
+        int ok = 0, bad = 0;
+        for (auto& f : files)
+        {
+            juce::MemoryBlock mb;
+            if (! npD64Extract (img, f, mb) || mb.getSize() < 100 || ((const juce::uint8*) mb.getData())[1] != 0x0f) continue;
+            NpTune t; juce::String err;
+            if (! t.loadPrg (mb.getData(), mb.getSize(), err)) { out (f.name + ": " + err); ++bad; continue; }
+            const auto back = t.toPrg();
+            const bool same = back.getSize() == mb.getSize() && std::memcmp (back.getData(), mb.getData(), mb.getSize()) == 0;
+            const auto psid = t.toPsid (f.name, "JCH", "test");
+            const auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
+            auto tr = computeTrace (si, 1, 15.0);
+            int act = 0; if (tr) for (int v = 0; v < 3; ++v) for (juce::uint32 i = 0; i < tr->frames; ++i) act += tr->v[v].note[i] >= 0;
+            out (f.name.paddedRight (' ', 18) + " player " + t.playerName().paddedRight (' ', 6) + " speed " + juce::String (t.speed()) + " tracks " + juce::String (t.trackListLength (0)) + "/" + juce::String (t.trackListLength (1)) + "/" + juce::String (t.trackListLength (2))
+                 + " seqs " + juce::String ((int) t.usedSequences().size()) + " est " + juce::String (t.estimateSeconds(), 1) + "s round-trip " + (same ? "OK" : "DIFF") + " events " + juce::String (tr && tr->events ? (int) tr->events->size() : 0) + " sounding " + juce::String (act));
+            ++ok;
+            {
+                // start from the third track entry: the copy must still play
+                const auto t2 = t.withStartIndex ({ 2, 2, 2 });
+                const auto p2 = t2.toPsid ("x", "x", "x");
+                auto tr2 = computeTrace (parseSidBytes (p2.getData(), p2.getSize(), true), 1, 8.0);
+                int act2 = 0; if (tr2) for (int v = 0; v < 3; ++v) for (juce::uint32 i = 0; i < tr2->frames; ++i) act2 += tr2->v[v].note[i] >= 0;
+                out ("    from entry 2: tracks " + juce::String (t2.trackListLength (0)) + "/" + juce::String (t2.trackListLength (1)) + "/" + juce::String (t2.trackListLength (2)) + " sounding " + juce::String (act2));
+            }
+            if (argc > 3 && ok == 1)
+            {
+                // text dump of the first sequence of voice 1
+                auto tl = t.trackList (0);
+                if (! tl.empty())
+                {
+                    out ("track 0: " + juce::String::toHexString (tl[0].trans) + " " + juce::String::toHexString (tl[0].seq));
+                    for (auto& r : t.sequence (tl[0].seq)) out ("  " + juce::String::toHexString (r.cmd) + " " + juce::String::toHexString (r.note));
+                }
+            }
+        }
+        out (juce::String (ok) + " tunes ok, " + juce::String (bad) + " rejected");
+        return 0;
+    }
+
+    if (cmd == "npedit" && argc > 3)
+    {
+        // SidTest npedit <template.prg> <out.sid>: new tune from the template, writes a short melody, exports and plays it
+        NpTune t; juce::String err;
+        if (! t.loadFile (juce::File (juce::String::fromUTF8 (argv[2])), err)) { out (err); return 1; }
+        out ("template: player " + t.playerName() + " speed " + juce::String (t.speed()) + " seq0 rows " + juce::String ((int) t.sequence (0).size()) + " usable1 " + juce::String ((int) t.sequenceUsable (1)));
+        t.setSpeed (4);
+        // instrument 1: saw lead
+        const juce::uint8 ins[8] = { 0x08, 0xa8, 0x80, 0x00, 0x00, 0x00, 0x04, 0x04 };   // v20: ADSR, hard restart on, arpeggio pointers 4
+        for (int i = 0; i < 8; ++i) t.set (NpTune::tabInstrument, 1, i, ins[i]);
+        t.set (NpTune::tabArpeggio, 4, 0, 0x00); t.set (NpTune::tabArpeggio, 4, 1, 0x21);   // saw, no note add
+        t.set (NpTune::tabArpeggio, 5, 0, 0x7f); t.set (NpTune::tabArpeggio, 5, 1, 0x04);   // wrap to row 4
+        std::vector<NpRow> rows;
+        const int notes[] = { 48, 52, 55, 60, 55, 52, 48, 0 };
+        for (int i = 0; i < 8; ++i) { NpRow r; if (i == 0) r.cmd = 0xa1; r.note = (juce::uint8) notes[i]; rows.push_back (r); rows.push_back ({ 0x80, 0x7e }); }
+        t.makeBlankSequence (1, 16);
+        t.setSequence (1, rows);
+        t.setTrackAll (0, { { 0x8c, 1 }, { 0x8c, 1 }, { 0xff, 0 } });
+        const auto psid = t.toPsid ("Tracker test", "SIDiMIDI", "2026");
+        juce::File (juce::String::fromUTF8 (argv[3])).replaceWithData (psid.getData(), psid.getSize());
+        const auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
+        auto tr = computeTrace (si, 1, 12.0);
+        int act[3] = {};
+        if (tr) for (int v = 0; v < 3; ++v) for (juce::uint32 i = 0; i < tr->frames; ++i) act[v] += tr->v[v].note[i] >= 0;
+        if (tr) { juce::String seq; float last = -9; for (juce::uint32 i = 0; i < tr->frames && seq.length() < 80; ++i) { const float n = tr->v[0].note[i]; if (n >= 0 && std::abs (n - last) > 0.4f) { seq << juce::String (n, 1) << " "; last = n; } } out ("voice 1 notes: " + seq); }
+        out ("trace frames " + juce::String (tr ? (int) tr->frames : 0) + " sounding frames per voice " + juce::String (act[0]) + "/" + juce::String (act[1]) + "/" + juce::String (act[2]) + " note range " + juce::String (tr ? tr->minNote : 0) + ".." + juce::String (tr ? tr->maxNote : 0));
         return 0;
     }
 
