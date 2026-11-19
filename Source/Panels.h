@@ -3,6 +3,10 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Look.h"
 #include "Lang.h"
+#include "Hvsc.h"
+#include "HvscUpdate.h"
+#include <atomic>
+#include <memory>
 
 namespace sm
 {
@@ -46,5 +50,57 @@ private:
     juce::String about, tips;
     int page = 0;
     void layout() override;
+};
+
+// HVSC: installed version, online check, download + installation of the update packages (with backup)
+class HvscPanel : public Overlay, private juce::Thread, private juce::Timer
+{
+public:
+    static constexpr const char* kDownloadsUrl = "https://hvsc.c64.org/downloads";
+    explicit HvscPanel (MainComponent& m);
+    ~HvscPanel() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+private:
+    enum class Task { none, check, install };
+    juce::ComboBox collections;
+    juce::TextEditor log;
+    juce::TextButton checkBtn, installBtn, fullBtn, closeBtn, addBtn;
+    double progressValue = 0.0;
+    juce::ProgressBar bar { progressValue };
+    std::vector<std::shared_ptr<Hvsc>> list;
+    juce::String infoLines;
+
+    // worker side (the thread only touches these under `lock`)
+    juce::CriticalSection lock;
+    juce::StringArray queuedLog;
+    juce::String stage;
+    double fraction = 0.0;
+    Task task = Task::none;
+    std::atomic<bool> finished { false };
+    std::shared_ptr<Hvsc> target;
+    // results of the check
+    std::vector<int> missing;
+    std::vector<juce::int64> missingSizes;
+    bool offline = false;
+    bool installOk = false;
+    int installedVersion = 0;
+    juce::File lastBackup;
+
+    bool busy() const { return task != Task::none; }
+    std::shared_ptr<Hvsc> selected() const;
+    void layout() override;
+    void refreshInfo();
+    void updateButtons();
+    void startTask (Task t);
+    void askInstall();
+    void say (const juce::String& line);
+    void run() override;
+    void doCheck();
+    void doInstall();
+    void timerCallback() override;
+    void taskFinished();
 };
 } // namespace sm

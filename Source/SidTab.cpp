@@ -164,7 +164,7 @@ void SidTab::applyLanguage()
 {
     folders.setButtonText (T ("Ordner"));
     scan.setButtonText (arch.isScanning() ? T ("Stopp") : T ("Einlesen"));
-    hvscBtn.setButtonText ("HVSC");
+    hvscBtn.setButtonText (hvscNewest > 0 ? juce::String::fromUTF8 ("HVSC ▲") : juce::String ("HVSC"));
     filterBtn.setButtonText (T ("Filter"));
     ratingBtn.setButtonText (juce::String::fromUTF8 ("★"));
     clearFilters.setButtonText (T ("Filter löschen"));
@@ -175,7 +175,8 @@ void SidTab::applyLanguage()
     search.setTextToShowWhenEmpty (T ("Suche in Titel, Autor, Komponist, Pfad …"), juce::Colours::grey);
     folders.setTooltip (T ("SID-Ordner hinzufügen, entfernen oder schreibschützen (Ordner lassen sich auch ins Fenster ziehen)"));
     scan.setTooltip (T ("Alle Ordner einlesen – neue und geänderte SID-Dateien werden in die Datenbank aufgenommen"));
-    hvscBtn.setTooltip (T ("High Voltage SID Collection: Version, Update-Prüfung und Aktualisierung"));
+    hvscBtn.setTooltip (hvscNewest > 0 ? T ("Neue HVSC-Version verfügbar: #%1. Klicken zum Aktualisieren.", hvscNewest)
+                                       : T ("High Voltage SID Collection: Version, Update-Prüfung und Aktualisierung"));
     playBtn.setTooltip (T ("Markierten Tune abspielen / pausieren (Leertaste)"));
     stopBtn.setTooltip (T ("Stopp"));
     filterBtn.setTooltip (T ("Nach Herkunft und Besonderheiten filtern"));
@@ -453,6 +454,26 @@ void SidTab::playNext (int delta)
 
 void SidTab::timerCallback()
 {
+    if (! hvscChecked && ! arch.isScanning() && main.updateChecksEnabled())
+    {
+        const auto hv = arch.hvscList();
+        if (! hv.empty() && hv.front()->version > 0)
+        {
+            hvscChecked = true;
+            const int local = hv.front()->version;
+            juce::Component::SafePointer<SidTab> safe (this);
+            main.jobs().addJob ([safe, local]
+            {
+                const int newest = HvscOnline::latestVersion (local);
+                juce::MessageManager::callAsync ([safe, newest, local]
+                {
+                    if (safe == nullptr || newest <= local) return;
+                    safe->hvscNewest = newest;
+                    safe->applyLanguage();
+                });
+            });
+        }
+    }
     auto& pl = main.player();
     if (playingId != 0 && pl.hasSidTrace())
     {
@@ -562,25 +583,7 @@ void SidTab::showFolderMenu()
 
 void SidTab::showHvscMenu()
 {
-    juce::PopupMenu m;
-    const auto list2 = arch.hvscList();
-    if (list2.empty())
-        m.addItem (-1, T ("Keine HVSC in den Archiv-Ordnern gefunden"), false);
-    for (auto& h : list2)
-    {
-        m.addItem (-2, "HVSC #" + juce::String (h->version) + (h->versionDate.isNotEmpty() ? "  (" + h->versionDate + ")" : juce::String()) + "   " + h->root.getFullPathName(), false);
-        m.addItem (-3, T ("   %1 Songlängen · %2 STIL-Einträge · %3 Bug-Hinweise · %4 Musiker", h->lengthEntries(), h->stilEntries(), h->bugEntries(), h->musicianEntries()), false);
-    }
-    m.addSeparator();
-    m.addItem (2, T ("HVSC-Ordner hinzufügen …"));
-    m.addItem (3, T ("HVSC-Dokumente neu einlesen"), ! list2.empty());
-    juce::Component::SafePointer<SidTab> safe (this);
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&hvscBtn), [safe] (int r)
-    {
-        if (safe == nullptr) return;
-        if (r == 2) safe->addFolderDialog();
-        else if (r == 3) { safe->arch.reloadHvsc(); safe->arch.startScan (true); }
-    });
+    main.showOverlay (std::make_unique<HvscPanel> (main));
 }
 
 // ---- filter menus

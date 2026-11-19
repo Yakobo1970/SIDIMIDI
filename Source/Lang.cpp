@@ -1,4 +1,5 @@
 #include "Lang.h"
+#include "Texts.h"
 #include <atomic>
 #include <cstring>
 #include <string>
@@ -72,6 +73,9 @@ const Row* find (const char* de)
 juce::String lookup (const char* de)
 {
     const auto l = language();
+    if (de[0] == '@')
+        if (auto* text = longText (de, (int) l))
+            return juce::String::fromUTF8 (text);
     if (l != Lang::de)
         if (auto* r = find (de))
             return juce::String::fromUTF8 (l == Lang::en ? r->en : r->fr);

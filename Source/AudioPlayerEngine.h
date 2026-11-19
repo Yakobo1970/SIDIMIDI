@@ -311,7 +311,7 @@ public:
     //
     // Spur- statt Kanal-basiert, da z.B. Studio-One-Exporte jede Spur als eigenen MTrk-Chunk
     // anlegen, aber meist alle auf Kanal 1 belassen (siehe MidiToSidCoreEngine::listAllTracks).
-    bool previewMidiTrack(const juce::File& midiFile, int trackIndex, juce::String* log = nullptr)
+    bool previewMidiTrack(const juce::File& midiFile, int trackIndex, juce::String* log = nullptr, int channelFilter = 0)
     {
         stop();
         if (!midiFile.existsAsFile() || trackIndex < 0) return false;
@@ -332,7 +332,8 @@ public:
         for (int i = 0; i < track->getNumEvents(); ++i)
         {
             auto* ev = track->getEventPointer(i);
-            if (ev != nullptr && !ev->message.isMetaEvent() && !ev->message.isSysEx())
+            if (ev != nullptr && !ev->message.isMetaEvent() && !ev->message.isSysEx()
+                && (channelFilter == 0 || ev->message.getChannel() == channelFilter))
                 newMidiEvents.push_back({ ev->message.getTimeStamp(), ev->message });
         }
 

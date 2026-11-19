@@ -91,6 +91,8 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     int viewHeight = 330, dragStart = 330;
     int infoWidth = 0;
+    bool hvscChecked = false;
+    int hvscNewest = 0;
     int filterType = 0, minStars = 0;
     int playingId = 0, playingSong = 0;
     bool pendingPlay = false, paused = false;

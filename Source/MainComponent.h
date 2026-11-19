@@ -39,6 +39,7 @@ public:
     void showOverlay (std::unique_ptr<Overlay> o);
     void closeOverlay();
     bool overlayOpen() const { return overlay != nullptr; }
+    bool updateChecksEnabled() const { return updateCheck->enabled(); }
     void showAbout (bool show);
     void applyTheme();
     void applyLanguage();

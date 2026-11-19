@@ -1,6 +1,9 @@
 // SIDiMIDI – tab "MIDI -> SID": open a folder of MIDI files, convert single files to SID with different depths.
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <atomic>
+#include <array>
+#include <thread>
 #include "Look.h"
 #include "Lang.h"
 
@@ -8,20 +11,84 @@ namespace sm
 {
 class MainComponent;
 
-class MidiTab : public juce::Component
+struct MidiItem
+{
+    juce::File file;
+    juce::String name, folder;      // folder relative to the opened folder
+    int tracks = 0, notes = 0;      // tracks that contain notes
+    double seconds = 0;
+    bool valid = false, roundTrip = false;
+    juce::File result;              // the .sid written by the last conversion
+};
+
+class MidiTab : public juce::Component, private juce::TableListBoxModel, private juce::Timer
 {
 public:
     explicit MidiTab (MainComponent& m);
     ~MidiTab() override;
+
     void resized() override;
     void paint (juce::Graphics&) override;
-    bool handleKey (const juce::KeyPress&) { return false; }
-    void applyLanguage() {}
-    void applyTheme() { repaint(); }
-    void saveState() {}
-    void openFolder (const juce::File&) {}
-    juce::String statusSummary() const { return {}; }
+    bool handleKey (const juce::KeyPress&);
+    void applyLanguage();
+    void applyTheme();
+    void saveState();
+    void openFolder (const juce::File& dir);
+    juce::String statusSummary() const;
+    void stopPreview();
+
+    // conversion (also used by the track panel)
+    enum class Depth { quick, targeted, roundTrip };
+    void convert (int itemIndex, Depth depth);
+    void convertTracks (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip);
+    void playMidi (int itemIndex);
+    void playSidResult (int itemIndex);
+    const MidiItem* item (int index) const { return index >= 0 && index < (int) items.size() ? &items[(size_t) index] : nullptr; }
+    int itemOfRow (int row) const { return row >= 0 && row < (int) shown.size() ? shown[(size_t) row] : -1; }
+    void selectFirstForTest() { if (! shown.empty()) table.selectRow (0); }
+    void openTrackPanelForTest (int itemIndex) { convert (itemIndex, Depth::targeted); }
+
 private:
     MainComponent& main;
+    juce::TableListBox table;
+    std::vector<MidiItem> items;
+    std::vector<int> shown;                  // indices into items (filtered, sorted)
+    juce::File folder;
+    juce::TextButton openBtn, recentBtn, rescanBtn, outputBtn, stopBtn, fundusBtn;
+    juce::ToggleButton subfolders;
+    juce::TextEditor search, description;
+    juce::Label pathLabel, fundusText, descriptionTitle;
+    juce::Rectangle<int> toolbarArea, infoBox;
+    std::unique_ptr<juce::FileChooser> chooser;
+    int sortCol = 2;
+    bool sortForward = true;
+
+    // scanning
+    struct Scan;
+    std::unique_ptr<Scan> scan;
+    juce::CriticalSection pendingLock;
+    std::vector<MidiItem> pending;
+    std::atomic<bool> scanFinished { true };
+    std::atomic<int> scanTotal { 0 };
+    int playingItem = -1;
+    juce::String lastMessage;
+
+    void startScan();
+    void stopScan();
+    void rebuildShown();
+    void showOutputMenu();
+    void showRecentMenu();
+    juce::File sidTargetFor (const MidiItem& m) const;
+    void timerCallback() override;
+
+    // TableListBoxModel
+    int getNumRows() override { return (int) shown.size(); }
+    void paintRowBackground (juce::Graphics&, int row, int w, int h, bool selected) override;
+    void paintCell (juce::Graphics&, int row, int col, int w, int h, bool selected) override;
+    juce::Component* refreshComponentForCell (int row, int col, bool selected, juce::Component* existing) override;
+    void sortOrderChanged (int col, bool forwards) override { sortCol = col; sortForward = forwards; rebuildShown(); }
+    void cellDoubleClicked (int row, int col, const juce::MouseEvent&) override;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiTab)
 };
-}
+} // namespace sm

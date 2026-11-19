@@ -7,6 +7,8 @@
 #include "../Source/Hvsc.h"
 #include "../Source/Archive.h"
 #include "../Source/SidTrace.h"
+#include "../Source/SevenZip.h"
+#include "../Source/HvscUpdate.h"
 #include "../Source/SidToMidiCore.h"
 #include "../Source/MidiToSidCore.h"
 #include <iostream>
@@ -195,6 +197,20 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    if (cmd == "parts" && argc > 2)
+    {
+        // SidTest parts <mid>: the parts (track / channel) the converter offers and its automatic choice
+        juce::String log;
+        std::vector<MidiToSidCoreEngine::ChannelSuggestion> all;
+        MidiToSidCoreEngine::listAllTracks (juce::File (juce::String::fromUTF8 (argv[2])), all, log);
+        for (auto& p : all) out ("  part " + juce::String::toHexString (p.partId()) + ": " + p.label);
+        bool round = false;
+        std::array<MidiToSidCoreEngine::ChannelSuggestion, 3> sug;
+        MidiToSidCoreEngine::analyzeMidiFile (juce::File (juce::String::fromUTF8 (argv[2])), round, sug, log);
+        out ("auto: " + sug[0].label + " | " + sug[1].label + " | " + sug[2].label + (round ? " (round trip)" : ""));
+        return 0;
+    }
+
     if (cmd == "tosid" && argc > 3)
     {
         // SidTest tosid <mid> <out.sid> [auto|roundtrip]
@@ -204,12 +220,74 @@ int main (int argc, char** argv)
         std::array<MidiToSidCoreEngine::ChannelSuggestion, 3> sug;
         if (! MidiToSidCoreEngine::analyzeMidiFile (mid, round, sug, log)) { out ("analyse failed " + log); return 1; }
         if (argc > 4 && juce::String (argv[4]) == "roundtrip") round = true; else if (argc > 4) round = false;
-        std::array<int, 3> idx { sug[0].trackIndex, sug[1].trackIndex, sug[2].trackIndex };
+        std::array<int, 3> idx { sug[0].partId(), sug[1].partId(), sug[2].partId() };
         const bool ok = MidiToSidCoreEngine::convertMidiToSidFile (mid, target, idx, round, log);
         out ((ok ? "ok " : "FEHLER ") + log.trim());
         return ok ? 0 : 1;
     }
 
-    out ("usage: SidTest info <file> | hvsc <folder> | scanstat <folder> [max]");
+    if (cmd == "un7z" && argc > 3)
+    {
+        // SidTest un7z <archive.7z> <dest> : extracts everything (also lists)
+        const juce::File arc (juce::String::fromUTF8 (argv[2])), dest (juce::String::fromUTF8 (argv[3]));
+        juce::String err;
+        juce::StringArray skipped;
+        const auto t0 = juce::Time::getMillisecondCounter();
+        const bool ok = SevenZip::extractAll (arc, dest, [] (juce::uint64, juce::uint64, const juce::String&) { return true; }, err, &skipped);
+        out ((ok ? "ok" : "FEHLER: " + err) + juce::String (" in ") + juce::String ((int) (juce::Time::getMillisecondCounter() - t0)) + " ms, skipped " + juce::String (skipped.size()));
+        return ok ? 0 : 1;
+    }
+
+    if (cmd == "hvscverify" && argc > 3)
+    {
+        // SidTest hvscverify <C64Music root> <UpdateNN.hvs> : parses the script, compares header patches with the real files
+        const juce::File root (juce::String::fromUTF8 (argv[2])), script (juce::String::fromUTF8 (argv[3]));
+        juce::StringArray warnings, mismatches;
+        const auto ops = parseHvscScript (readDocumentText (script), warnings);
+        int counts[20] = {};
+        for (auto& o : ops) ++counts[(int) o.type];
+        out ("Operationen: " + juce::String ((int) ops.size()) + " (replace " + juce::String (counts[0]) + ", move " + juce::String (counts[1]) + ", delete " + juce::String (counts[2])
+             + ", mkdir " + juce::String (counts[3]) + ", Kopfdaten " + juce::String ((int) ops.size() - counts[0] - counts[1] - counts[2] - counts[3]) + ")");
+        for (int i = 0; i < std::min (10, warnings.size()); ++i) out ("Warnung: " + warnings[i]);
+        out ("Warnungen gesamt: " + juce::String (warnings.size()));
+        int checked = 0;
+        const int ok = verifyHvscHeaders (root, ops, mismatches, &checked);
+        out ("Kopfdaten geprüft: " + juce::String (checked) + ", übereinstimmend: " + juce::String (ok));
+        for (int i = 0; i < std::min (15, mismatches.size()); ++i) out ("  Abweichung: " + mismatches[i]);
+        return 0;
+    }
+
+    if (cmd == "hvscapply" && argc > 4)
+    {
+        // SidTest hvscapply <root> <script.hvs> <backupDir> : applies a script (only ever run on a scratch copy!)
+        const juce::File root (juce::String::fromUTF8 (argv[2])), script (juce::String::fromUTF8 (argv[3])), backup (juce::String::fromUTF8 (argv[4]));
+        juce::StringArray warnings;
+        const auto ops = parseHvscScript (readDocumentText (script), warnings);
+        HvscApplyResult r;
+        const bool ok = applyHvscScript (root, ops, backup, r);
+        out (juce::String (ok ? "ok" : "abgebrochen") + ": verschoben " + juce::String (r.moved) + ", ersetzt " + juce::String (r.replaced) + ", gelöscht " + juce::String (r.deleted)
+             + ", Köpfe " + juce::String (r.patched) + ", fehlend " + juce::String (r.missing) + ", Fehler " + juce::String (r.errors));
+        for (int i = 0; i < std::min (20, r.messages.size()); ++i) out ("  " + r.messages[i]);
+        return r.errors == 0 ? 0 : 1;
+    }
+
+    if (cmd == "hvscinstall" && argc > 5)
+    {
+        // SidTest hvscinstall <root> <version> <package.7z|zip> <backupDir> : full install chain (only on a scratch copy!)
+        const juce::File root (juce::String::fromUTF8 (argv[2])), pkg (juce::String::fromUTF8 (argv[4])), backup (juce::String::fromUTF8 (argv[5]));
+        const auto r = installHvscPackage (root, juce::String (argv[3]).getIntValue(), pkg, backup, [] (const juce::String& s, double f)
+        {
+            static juce::String last;
+            if (s != last) { last = s; out ("  " + s + " " + juce::String (juce::roundToInt (f * 100)) + " %"); }
+            return true;
+        });
+        out (juce::String (r.ok ? "ok" : "FEHLER: " + r.error) + ": kopiert " + juce::String (r.copiedFiles) + ", verschoben " + juce::String (r.applied.moved) + ", ersetzt "
+             + juce::String (r.applied.replaced) + ", gelöscht " + juce::String (r.applied.deleted) + ", Köpfe " + juce::String (r.applied.patched)
+             + ", fehlend " + juce::String (r.applied.missing) + ", Fehler " + juce::String (r.applied.errors));
+        for (int i = 0; i < std::min (20, r.applied.messages.size()); ++i) out ("  " + r.applied.messages[i]);
+        return r.ok ? 0 : 1;
+    }
+
+    out ("usage: SidTest info <file> | hvsc <folder> | scanstat <folder> [max] | hvscverify <root> <script.hvs> | hvscapply <root> <script.hvs> <backup>");
     return 2;
 }

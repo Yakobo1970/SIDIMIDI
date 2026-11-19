@@ -49,6 +49,12 @@ public:
         int noteCount = 0;
         double avgPitch = 0.0;
         juce::String label;    // Anzeigetext für die UI-ComboBox/Liste
+        // 0 = die ganze Spur; 1-16 = nur dieser MIDI-Kanal der Spur. MIDI-Dateien vom Typ 0 (alles in
+        // einer Spur) und manche Exporte legen mehrere Stimmen auf verschiedene Kanäle derselben Spur -
+        // diese lassen sich nur mit Kanalfilter als getrennte SID-Stimmen wählen.
+        int channelFilter = 0;
+        // Kennung für convertMidiToSidFile(): Spurindex, bei Kanalfilter zusätzlich der Kanal in Bit 16-20
+        int partId() const { return trackIndex | (channelFilter << 16); }
     };
 
     // Liest die MIDI-Datei, erkennt den SIDM-Rundweg-Sonderfall (siehe SidToMidiCore.h::
@@ -88,11 +94,30 @@ public:
         std::sort(ranked.begin(), ranked.end(), [](const ChannelSuggestion& a, const ChannelSuggestion& b) {
             return a.noteCount > b.noteCount;
             });
-        if (ranked.size() > 3)
-            ranked.resize(3);
-        std::sort(ranked.begin(), ranked.end(), [](const ChannelSuggestion& a, const ChannelSuggestion& b) {
-            return a.avgPitch < b.avgPitch;
-            });
+        // Gibt es Schlagzeug (Kanal 10) UND mindestens zwei Melodiestimmen, bekommt das Schlagzeug
+        // eine der drei Stimmen (als Voice 3) - die übrigen zwei gehen an die notenreichsten
+        // Melodiestimmen, tiefste = Voice 1. Sonst: die drei notenreichsten, nach Tonlage sortiert.
+        {
+            auto isDrums = [](const ChannelSuggestion& c) { return c.channel == 10; };
+            std::vector<ChannelSuggestion> melodic, drums;
+            for (auto& c : ranked) (isDrums(c) ? drums : melodic).push_back(c);
+            if (!drums.empty() && melodic.size() >= 2)
+            {
+                melodic.resize(2);
+                std::sort(melodic.begin(), melodic.end(), [](const ChannelSuggestion& a, const ChannelSuggestion& b) {
+                    return a.avgPitch < b.avgPitch;
+                    });
+                ranked = { melodic[0], melodic[1], drums[0] };
+            }
+            else
+            {
+                if (ranked.size() > 3)
+                    ranked.resize(3);
+                std::sort(ranked.begin(), ranked.end(), [](const ChannelSuggestion& a, const ChannelSuggestion& b) {
+                    return a.avgPitch < b.avgPitch;
+                    });
+            }
+        }
 
         for (size_t i = 0; i < ranked.size() && i < 3; ++i)
             outSuggested[i] = ranked[i];
@@ -166,10 +191,15 @@ public:
         std::array<bool, 3> voiceHasProgram = { false, false, false };
         std::array<int, 3> voiceChannel = { -1, -1, -1 };
         std::array<const juce::MidiMessageSequence*, 3> voiceTrack = { nullptr, nullptr, nullptr };
+        std::array<int, 3> voiceChannelFilter = { 0, 0, 0 };
 
         for (int v = 0; v < 3; ++v)
         {
-            int idx = trackIndices[(size_t)v];
+            // Kennung = Spurindex (Bit 0-15) + optional Kanalfilter (Bit 16-20), siehe ChannelSuggestion::partId()
+            const int part = trackIndices[(size_t)v];
+            int idx = part < 0 ? -1 : (part & 0xFFFF);
+            const int chanFilter = part < 0 ? 0 : ((part >> 16) & 0x1F);
+            voiceChannelFilter[(size_t)v] = chanFilter;
             auto* track = (idx >= 0 && idx < parsedFile.getNumTracks()) ? parsedFile.getTrack(idx) : nullptr;
             voiceTrack[(size_t)v] = track;
             if (track == nullptr) continue;
@@ -178,6 +208,7 @@ public:
             {
                 auto* ev = track->getEventPointer(i);
                 if (ev == nullptr) continue;
+                if (chanFilter > 0 && ev->message.getChannel() != chanFilter) continue;
 
                 if (ev->message.isProgramChange() && !voiceHasProgram[(size_t)v])
                 {
@@ -202,7 +233,7 @@ public:
         // überlappende Noten auf eine einzige Linie reduziert.
         for (int v = 0; v < 3; ++v)
             if (voiceTrack[(size_t)v] != nullptr)
-                resolveNoteOffs(*voiceTrack[(size_t)v], rawNotes[(size_t)v]);
+                resolveNoteOffs(*voiceTrack[(size_t)v], rawNotes[(size_t)v], voiceChannelFilter[(size_t)v]);
 
         juce::String title = midiFile.getFileNameWithoutExtension();
 
@@ -287,40 +318,54 @@ private:
             auto* track = parsedFile.getTrack(t);
             if (track == nullptr) continue;
 
-            int noteCount = 0;
-            double pitchSum = 0.0;
-            int channel = -1;
+            struct ChanStat { int noteCount = 0; double pitchSum = 0.0; int program = -1; };
+            std::array<ChanStat, 17> chans;
             juce::String name;
-
             for (int i = 0; i < track->getNumEvents(); ++i)
             {
                 auto* ev = track->getEventPointer(i);
                 if (ev == nullptr) continue;
                 const auto& msg = ev->message;
                 if (name.isEmpty() && msg.isTrackNameEvent())
-                {
                     name = msg.getTextFromTextMetaEvent();
-                }
                 else if (msg.isNoteOn())
                 {
-                    noteCount++;
-                    pitchSum += msg.getNoteNumber();
-                    if (channel < 0) channel = msg.getChannel();
+                    auto& c = chans[(size_t)juce::jlimit(1, 16, msg.getChannel())];
+                    c.noteCount++;
+                    c.pitchSum += msg.getNoteNumber();
+                }
+                else if (msg.isProgramChange())
+                {
+                    auto& c = chans[(size_t)juce::jlimit(1, 16, msg.getChannel())];
+                    if (c.program < 0) c.program = msg.getProgramChangeNumber();
                 }
             }
 
-            if (noteCount <= 0) continue;
+            int channelsWithNotes = 0, onlyChannel = -1;
+            for (int ch = 1; ch <= 16; ++ch)
+                if (chans[(size_t)ch].noteCount > 0) { ++channelsWithNotes; onlyChannel = ch; }
+            if (channelsWithNotes == 0) continue;
 
-            ChannelSuggestion cs;
-            cs.trackIndex = t;
-            cs.channel = channel;
-            cs.noteCount = noteCount;
-            cs.avgPitch = pitchSum / (double)noteCount;
             juce::String trackLabel = name.isNotEmpty() ? name : ("Spur " + juce::String(t));
-            cs.label = trackLabel + " (" + juce::String(noteCount)
-                + juce::String(juce::CharPointer_UTF8(" Noten, \xc3\x98-Tonh\xc3\xb6he "))
-                + juce::String(cs.avgPitch, 1) + ")";
-            outTracks.push_back(cs);
+            for (int ch = 1; ch <= 16; ++ch)
+            {
+                auto& c = chans[(size_t)ch];
+                if (c.noteCount <= 0) continue;
+                ChannelSuggestion cs;
+                cs.trackIndex = t;
+                cs.channel = ch;
+                cs.channelFilter = channelsWithNotes > 1 ? ch : 0;
+                cs.noteCount = c.noteCount;
+                cs.avgPitch = c.pitchSum / (double)c.noteCount;
+                juce::String l = trackLabel;
+                if (channelsWithNotes > 1)
+                    l << ", " << juce::String(juce::CharPointer_UTF8("Kanal ")) << ch << (ch == 10 ? " (Schlagzeug)" : juce::String());
+                cs.label = l + " (" + juce::String(c.noteCount)
+                    + juce::String::fromUTF8(" Noten, Ø-Tonhöhe ")
+                    + juce::String(cs.avgPitch, 1) + ")";
+                outTracks.push_back(cs);
+            }
+            (void)onlyChannel;
         }
         return true;
     }
@@ -407,7 +452,7 @@ private:
     // Note-Off-Event derselben Tonhöhe in dieser Spur zu (erste noch offene Note zuerst
     // beendet - korrekt für den Normalfall nicht verschachtelter Wiederholungen derselben
     // Tonhöhe).
-    static void resolveNoteOffs(const juce::MidiMessageSequence& track, std::vector<NoteEvent>& notes)
+    static void resolveNoteOffs(const juce::MidiMessageSequence& track, std::vector<NoteEvent>& notes, int channelFilter = 0)
     {
         std::sort(notes.begin(), notes.end(), [](const NoteEvent& a, const NoteEvent& b) { return a.startSeconds < b.startSeconds; });
 
@@ -418,7 +463,7 @@ private:
         {
             auto* ev = track.getEventPointer(i);
             if (ev == nullptr) continue;
-            if (ev->message.isNoteOff())
+            if (ev->message.isNoteOff() && (channelFilter == 0 || ev->message.getChannel() == channelFilter))
                 offs.push_back({ ev->message.getTimeStamp(), ev->message.getNoteNumber() });
         }
         std::sort(offs.begin(), offs.end(), [](const OffEvt& a, const OffEvt& b) { return a.time < b.time; });
