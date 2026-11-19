@@ -73,10 +73,14 @@ juce::MemoryBlock NpTune::toPsid (const juce::String& title, const juce::String&
     be16 (14, 1);         // songs
     be16 (16, 1);         // start song
     be16 (0x76, 0x0004);  // flags: PAL
-    auto put = [&] (int off, const juce::String& s)
+    auto put = [&] (int off, const juce::String& s)    // Latin-1, 31 characters at most
     {
-        const auto b = s.toStdString();    // Latin-1 would be nicer, ASCII is enough for the tracker
-        for (size_t i = 0; i < 31 && i < b.size(); ++i) h[(size_t) off + i] = (juce::uint8) b[i];
+        int i = 0;
+        for (auto c = s.getCharPointer(); ! c.isEmpty() && i < 31; ++i)
+        {
+            const auto ch = c.getAndAdvance();
+            h[(size_t) off + (size_t) i] = ch < 256 ? (juce::uint8) ch : (juce::uint8) '?';
+        }
     };
     put (0x16, title); put (0x36, author); put (0x56, released);
     std::memcpy (h + 0x7c, prg.getData(), prg.getSize());

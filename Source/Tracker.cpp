@@ -191,6 +191,7 @@ public:
     void changeSpeed (int d);
     bool closeRequested (std::function<void()> then);
     void stopOnClose() { stop(); }
+    juce::MemoryBlock exportPsid() const { return tune.toPsid (sidTitle(), sidAuthor(), sidReleased()); }
     void loadForTest (const NpTune& t, const juce::File& f) { loadTune (t, f); }
 
     void resized() override;
@@ -203,7 +204,16 @@ public:
 private:
     juce::TextButton tabButtons[5], voiceMute[3], newBtn, openBtn, d64Btn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, cursorBtn, stopBtn,
                      octMinus, octPlus, spdMinus, spdPlus;
-    juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel;
+    juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel, titleLbl, authorLbl;
+    juce::TextEditor titleEd, authorEd;                 // title and author for the info area of the .sid (changeable defaults)
+    bool titleEdited = false;
+    juce::Rectangle<int> metaBox;
+    juce::String tuneName() const { return file != juce::File() ? file.getFileNameWithoutExtension() : T ("Neuer Tune"); }
+    void applyTitleDefault() { if (! titleEdited) titleEd.setText (tuneName(), false); }
+    juce::String sidTitle() const { return titleEd.getText().trim().isNotEmpty() ? titleEd.getText().trim() : tuneName(); }
+    juce::String sidAuthor() const { return authorEd.getText().trim(); }
+    // fixed: the release line; it names the tracker and its version
+    static juce::String sidReleased() { return juce::String (juce::Time::getCurrentTime().getYear()) + " SIDiMIDI V-Tracker " SM_VERSION_STRING; }
     std::unique_ptr<PatternView> patternPtr;
     std::unique_ptr<GridView> gridPtr;
     std::vector<NpTune> undoStack, redoStack;
@@ -888,7 +898,20 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     spdPlus.onClick = [this] { changeSpeed (1); };
     octMinus.setTooltip (T ("Oktave tiefer (F7)")); octPlus.setTooltip (T ("Oktave höher (F8)"));
     spdMinus.setTooltip (T ("Tune-Tempo: Frames je Zeile, kleiner = schneller")); spdPlus.setTooltip (T ("Tune-Tempo: Frames je Zeile, größer = langsamer"));
-    for (auto* l : { &infoLabel, &statusLabel, &helpLabel, &octLabel, &spdLabel }) addAndMakeVisible (*l);
+    for (auto* l : { &infoLabel, &statusLabel, &helpLabel, &octLabel, &spdLabel, &titleLbl, &authorLbl }) addAndMakeVisible (*l);
+    addAndMakeVisible (titleEd);
+    addAndMakeVisible (authorEd);
+    titleLbl.setText (T ("Titel"), juce::dontSendNotification);
+    authorLbl.setText (T ("Autor"), juce::dontSendNotification);
+    for (auto* e : { &titleEd, &authorEd }) { e->setFont (font (13.0f)); e->setIndents (5, 3); e->setInputRestrictions (31); }
+    titleEd.setTooltip (T ("Titel im Infobereich der .sid (Vorgabe: der Dateiname)"));
+    authorEd.setTooltip (T ("Autor im Infobereich der .sid; Ihre Angabe wird als Vorgabe gemerkt"));
+    {
+        const auto a = main.archive().settings.getProperty ("trackerAuthor").toString();
+        authorEd.setText (a.isNotEmpty() ? a : juce::String ("Un(d)AbtanzBAR"), false);
+    }
+    authorEd.onTextChange = [this] { main.archive().settings.setProperty ("trackerAuthor", authorEd.getText(), nullptr); main.notifySettings(); };
+    titleEd.onTextChange = [this] { titleEdited = true; };
     infoLabel.setFont (font (13.0f, true));
     statusLabel.setFont (font (12.5f));
     helpLabel.setFont (font (12.5f));
@@ -923,6 +946,8 @@ void TrackerPanel::loadTune (const NpTune& t, const juce::File& f)
     tune = t;
     file = f;
     dirty = false;
+    titleEdited = false;
+    applyTitleDefault();
     undoStack.clear(); redoStack.clear();
     tuneChanged();
     updateTitle();
@@ -1124,6 +1149,7 @@ void TrackerPanel::openD64()
             { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", err.isNotEmpty() ? err : T ("Die Datei lässt sich nicht lesen")); return; }
             safe->stop();
             safe->loadTune (t, {});
+            safe->titleEd.setText (f.name, false);
             safe->window.setName (titleBase() + " – " + f.name);
             safe->status (T ("Geladen: %1 (Variante %2)", f.name, t.playerName()));
         });
@@ -1143,6 +1169,7 @@ void TrackerPanel::importMidi (const juce::File& midi)
     auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize);
     if (! r.ok) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", r.report); return; }
     loadTune (r.tune, {});
+    titleEd.setText (midi.getFileNameWithoutExtension(), false);
     dirty = true;                                   // not saved yet
     window.setName (titleBase() + " – " + midi.getFileNameWithoutExtension() + " *");
     status (T ("MIDI umgewandelt: %1", midi.getFileName()));
@@ -1157,6 +1184,7 @@ void TrackerPanel::saveFile (bool saveAs)
         juce::String err;
         if (! safe->tune.saveFile (f, err)) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", err); return; }
         safe->file = f; safe->dirty = false;
+        safe->applyTitleDefault();
         safe->main.archive().settings.setProperty ("trackerDir", f.getParentDirectory().getFullPathName(), nullptr);
         safe->main.notifySettings();
         safe->updateTitle();
@@ -1171,12 +1199,12 @@ void TrackerPanel::saveFile (bool saveAs)
 void TrackerPanel::exportSid()
 {
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
-    const auto name = (file != juce::File() ? file.getFileNameWithoutExtension() : juce::String ("Neuer Tune"));
-    main.chooseSaveFile (T ("Als SID-Datei speichern"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (name + ".sid"),
-                         "*.sid", [safe = juce::Component::SafePointer<TrackerPanel> (this), name] (const juce::File& f)
+    const auto name = tuneName();
+    main.chooseSaveFile (T ("Als SID-Datei speichern"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (juce::File::createLegalFileName (name) + ".sid"),
+                         "*.sid", [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f)
     {
         if (safe == nullptr) return;
-        const auto psid = safe->tune.toPsid (name, "Un(d)AbtanzBAR / SIDiMIDI", juce::String (juce::Time::getCurrentTime().getYear()) + " SIDiMIDI, JCH/Vibrants");
+        const auto psid = safe->tune.toPsid (safe->sidTitle(), safe->sidAuthor(), sidReleased());
         const auto target = f.hasFileExtension ("sid") ? f : f.withFileExtension ("sid");
         if (target.replaceWithData (psid.getData(), psid.getSize())) safe->status (T ("SID geschrieben: %1", target.getFullPathName()));
         else safe->status (T ("Schreiben nicht möglich"));
@@ -1186,12 +1214,12 @@ void TrackerPanel::exportSid()
 void TrackerPanel::exportMidi()
 {
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
-    const auto name = (file != juce::File() ? file.getFileNameWithoutExtension() : juce::String ("Neuer Tune"));
-    main.chooseSaveFile (T ("Als MIDI-Datei speichern"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (name + ".mid"),
-                         "*.mid", [safe = juce::Component::SafePointer<TrackerPanel> (this), name] (const juce::File& f)
+    const auto name = tuneName();
+    main.chooseSaveFile (T ("Als MIDI-Datei speichern"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (juce::File::createLegalFileName (name) + ".mid"),
+                         "*.mid", [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f)
     {
         if (safe == nullptr) return;
-        const auto psid = safe->tune.toPsid (name, "Un(d)AbtanzBAR / SIDiMIDI", juce::String (juce::Time::getCurrentTime().getYear()) + " SIDiMIDI, JCH/Vibrants");
+        const auto psid = safe->tune.toPsid (safe->sidTitle(), safe->sidAuthor(), sidReleased());
         const auto tmp = juce::File::createTempFile (".sid");
         tmp.replaceWithData (psid.getData(), psid.getSize());
         const auto target = f.hasFileExtension ("mid") ? f : f.withFileExtension ("mid");
@@ -1235,10 +1263,26 @@ void TrackerPanel::resized()
     for (int i = 0; i < 5; ++i) tabButtons[i].setBounds (tabs.removeFromLeft (i == 4 ? tabs.getWidth() : tw).reduced (1, 0));
     right.removeFromTop (4);
     helpLabel.setBounds (right.removeFromBottom (76));
+    right.removeFromBottom (6);
+    metaBox = right.removeFromBottom (68);
+    {
+        auto m = metaBox.reduced (8, 7);
+        auto r1 = m.removeFromTop (24);
+        m.removeFromTop (6);
+        auto r2 = m.removeFromTop (24);
+        titleLbl.setBounds (r1.removeFromLeft (56)); titleEd.setBounds (r1);
+        authorLbl.setBounds (r2.removeFromLeft (56)); authorEd.setBounds (r2);
+    }
+    right.removeFromBottom (6);
     grid->setBounds (right);
 }
 
-void TrackerPanel::paint (juce::Graphics& g) { g.fillAll (theme().panel); }
+void TrackerPanel::paint (juce::Graphics& g)
+{
+    g.fillAll (theme().panel);
+    g.setColour (theme().bg);
+    g.fillRoundedRectangle (metaBox.toFloat(), 6.0f);
+}
 
 bool TrackerPanel::keyPressed (const juce::KeyPress& k)
 {
@@ -1298,7 +1342,7 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
     }
     if (exportSid != juce::File())
     {
-        const auto psid = content->tune.toPsid ("Test", "SIDiMIDI", "");
+        const auto psid = content->exportPsid();
         exportSid.replaceWithData (psid.getData(), psid.getSize());
     }
     if (play) content->play (false);

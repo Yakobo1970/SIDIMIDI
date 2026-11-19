@@ -503,6 +503,8 @@ const Row kRows[] = {
     { "Als MIDI-Datei speichern", "Save as MIDI file", "Enregistrer en fichier MIDI" },
     { "Als MIDI-Datei speichern (über die SID-nach-MIDI-Umwandlung)", "Save as MIDI file (through the SID to MIDI conversion)", "Enregistrer en fichier MIDI (par la conversion SID vers MIDI)" },
     { "Tracker", "Tracker", "Tracker" },
+    { "Titel im Infobereich der .sid (Vorgabe: der Dateiname)", "Title in the info area of the .sid (default: the file name)", "Titre dans la zone d'informations du .sid (par défaut : le nom du fichier)" },
+    { "Autor im Infobereich der .sid; Ihre Angabe wird als Vorgabe gemerkt", "Author in the info area of the .sid; your entry is remembered as the default", "Auteur dans la zone d'informations du .sid ; votre saisie est retenue comme valeur par défaut" },
     // ---- table end
 };
 
