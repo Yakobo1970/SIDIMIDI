@@ -81,7 +81,7 @@ public:
     void makeStarter();
 
     // ---- helpers
-    double estimateSeconds() const;        // length of the longest voice at the tune speed
+    double estimateSeconds() const;        // length of the longest voice (a row lasts speed + 1 frames)
     NpTune withStartIndex (const std::array<int, 3>& trackIndex) const;      // copy that begins at the given track entries
     int rowsOfEntry (const NpTrackEntry& e) const;                           // rows of the sequence the entry points to
 

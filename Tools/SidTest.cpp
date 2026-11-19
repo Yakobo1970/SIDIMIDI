@@ -330,6 +330,35 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    if (cmd == "nptiming" && argc > 4)
+    {
+        // SidTest nptiming <template.prg> <in.mid> <voice 1-3>: compares the rows of the imported tune with the gate edges the player produces
+        juce::MemoryBlock tpl;
+        juce::File (juce::String::fromUTF8 (argv[2])).loadFileAsData (tpl);
+        NpImport r;
+        const juce::File inFile (juce::String::fromUTF8 (argv[3]));
+        if (inFile.hasFileExtension ("mid;midi")) r = npImportMidi (inFile, tpl.getData(), tpl.getSize());
+        else { juce::String e; r.ok = r.tune.loadFile (inFile, e); r.report = e; }
+        if (! r.ok) { out (r.report); return 1; }
+        const int voice = juce::String (argv[4]).getIntValue() - 1;
+        const int sp = r.tune.speed();
+        std::vector<int> expectedRows;
+        int row = 0;
+        for (auto& e : r.tune.trackList (voice))
+            for (auto& rw : r.tune.sequence (e.seq)) { if (rw.note != 0 && rw.note != 0x7e) expectedRows.push_back (row); ++row; }
+        const auto psid = r.tune.toPsid ("t", "t", "t");
+        auto tr = computeTrace (parseSidBytes (psid.getData(), psid.getSize(), true), 1, std::min (40.0, r.tune.estimateSeconds()));
+        std::vector<int> gateOn;
+        bool prev = false;
+        for (juce::uint32 i = 0; tr && i < tr->frames; ++i) { const bool g = (tr->v[voice].mods[i] & 4) != 0; if (g && ! prev) gateOn.push_back ((int) i); prev = g; }
+        out ("speed " + juce::String (sp) + ", note starts in rows " + juce::String ((int) expectedRows.size()) + ", gate rises " + juce::String ((int) gateOn.size()));
+        juce::String line;
+        for (size_t i = 0; i < expectedRows.size() && i < gateOn.size() && i < 60; ++i)
+            line << "(" << (expectedRows[i] * (sp + 1)) << "," << gateOn[i] << "," << gateOn[i] - expectedRows[i] * (sp + 1) << ") ";
+        out (line);
+        return 0;
+    }
+
     if (cmd == "tracesample" && argc > 2)
     {
         // SidTest tracesample <folder> [max]: emulates the start song of many files (10 s) and counts problems

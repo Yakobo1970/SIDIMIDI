@@ -297,7 +297,7 @@ int NpTune::rowsOfEntry (const NpTrackEntry& e) const { return e.isMark() ? 0 : 
 double NpTune::estimateSeconds() const
 {
     double best = 0;
-    const int sp = std::max (1, speed());
+    const int sp = std::max (1, speed()) + 1;     // the player counts from the speed down to 0: a row lasts speed + 1 frames
     for (int v = 0; v < 3; ++v)
     {
         int rows = 0;

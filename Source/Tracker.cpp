@@ -1025,7 +1025,7 @@ void TrackerPanel::play (bool fromCursor)
     for (int v = 0; v < 3; ++v) main.player().setVoiceMuted (v, muted[(size_t) v]);
     main.player().playTrace (*tr->events, tr->fps, tr->frames, 0, si.ntsc());
     playing = true;
-    playSpeed = std::max (1, t.speed());
+    playSpeed = std::max (1, t.speed()) + 1;      // frames per row
     status ({});
 }
 

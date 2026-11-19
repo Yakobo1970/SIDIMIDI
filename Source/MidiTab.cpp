@@ -22,8 +22,7 @@ const MidiColDef kMidiCols[] = {
     { mTracks,  "Spuren",        54,  true,  "Spuren mit Noten" },
     { mNotes,   "Noten",         58,  true,  "Anzahl der Noten" },
     { mLength,  "Länge",         56,  true,  "Spieldauer" },
-    { mResult,  "Ergebnis",      240, false, "Die zuletzt geschriebene .sid-Datei – ▶ spielt sie ab" },
-    { mFolder,  "Ordner",        180, false, "Unterordner" } };
+    { mResult,  "Ergebnis",      240, false, "Die zuletzt geschriebene .sid-Datei – ▶ spielt sie ab" } };
 
 bool hasSidmSignature (juce::MidiFile& mf)
 {
@@ -613,11 +612,10 @@ void MidiTab::paintCell (juce::Graphics& g, int row, int col, int w, int h, bool
     juce::String text;
     switch (col)
     {
-        case mName: text = m->name; break;
+        case mName: text = (m->folder.isNotEmpty() ? m->folder + "/" : juce::String()) + m->name; break;   // files of subfolders show their folder in front
         case mTracks: text = m->valid ? juce::String (m->tracks) : juce::String(); break;
         case mNotes: text = m->valid ? juce::String (m->notes) : juce::String(); break;
         case mLength: text = m->valid ? formatTime (m->seconds) : juce::String(); break;
-        case mFolder: text = m->folder; break;
         default: return;
     }
     g.setColour (m->valid ? th.text : th.dim);

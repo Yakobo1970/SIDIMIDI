@@ -218,19 +218,34 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     if (! in.openedOk() || ! mf.readFrom (in)) { out.report = T ("Die MIDI-Datei lässt sich nicht analysieren"); return out; }
     mf.convertTimestampTicksToSeconds();
 
-    // tempo: the first tempo event decides the grid
-    double secPerQuarter = 0.5;
+    // tempo: the tempo that lasts longest decides the grid (a MIDI file without tempo means 120 BPM)
+    std::vector<std::pair<double, double>> tempi;       // (time, seconds per quarter)
     for (int t = 0; t < mf.getNumTracks(); ++t)
     {
-        bool found = false;
         auto* tr = mf.getTrack (t);
-        for (int i = 0; i < tr->getNumEvents() && ! found; ++i)
-            if (tr->getEventPointer (i)->message.isTempoMetaEvent()) { secPerQuarter = tr->getEventPointer (i)->message.getTempoSecondsPerQuarterNote(); found = true; }
-        if (found) break;
+        for (int i = 0; i < tr->getNumEvents(); ++i)
+            if (tr->getEventPointer (i)->message.isTempoMetaEvent())
+                tempi.push_back ({ tr->getEventPointer (i)->message.getTimeStamp(), tr->getEventPointer (i)->message.getTempoSecondsPerQuarterNote() });
+    }
+    std::sort (tempi.begin(), tempi.end());
+    double lastTime = 0;
+    for (int t = 0; t < mf.getNumTracks(); ++t) lastTime = std::max (lastTime, mf.getTrack (t)->getEndTime());
+    double secPerQuarter = 0.5;
+    {
+        double bestLen = -1;
+        for (size_t i = 0; i < tempi.size(); ++i)
+        {
+            const double until = i + 1 < tempi.size() ? tempi[i + 1].first : std::max (lastTime, tempi[i].first + 1.0);
+            if (until - tempi[i].first > bestLen) { bestLen = until - tempi[i].first; secPerQuarter = tempi[i].second; }
+        }
     }
     const double sixteenth = secPerQuarter / 4.0;
-    const int speed = juce::jlimit (2, 6, (int) std::lround (sixteenth * kFps));
-    const double rowSec = speed / kFps;
+    // the player counts a row from the tune speed down to 0, so a row lasts speed + 1 frames; the grid is a musical one
+    // (one row = one sixteenth), which keeps the rhythm even; the tempo can differ by a few percent from the MIDI file
+    const int framesPerRow = juce::jlimit (3, 10, (int) std::lround (sixteenth * kFps));
+    const int speed = framesPerRow - 1;
+    const double rowSec = sixteenth;
+    const double tempoError = (framesPerRow / kFps) / sixteenth - 1.0;      // > 0: the tune plays slower than the MIDI file
 
     std::array<InVoice, 3> voices;
     for (int v = 0; v < 3; ++v)
@@ -356,6 +371,7 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     out.ok = true;
     juce::String r;
     r << T ("MIDI → NewPlayer: Tempo %1 BPM, Tune-Tempo %2 (eine Zeile = ein Sechzehntel)", juce::String (60.0 / secPerQuarter, 0), speed) << "\n";
+    r << T ("Abweichung vom MIDI-Tempo: %1 % (Rasterung auf ganze Frames)", juce::String (tempoError * 100.0, 1)) << "\n";
     for (int v = 0; v < 3; ++v)
         r << T ("Stimme %1: %2", v + 1, voices[(size_t) v].label.isNotEmpty() ? voices[(size_t) v].label : T ("leer"))
           << (voices[(size_t) v].drums ? " – " + T ("Schlagzeug") : juce::String()) << "\n";

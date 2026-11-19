@@ -502,6 +502,7 @@ const Row kRows[] = {
     { "Von MIDI …", "From MIDI …", "Depuis MIDI …" },
     { "Eine MIDI-Datei in einen NewPlayer-Tune umwandeln: Akkorde werden Arpeggios, Schlagzeug bekommt eigene Instrumente", "Convert a MIDI file into a NewPlayer tune: chords become arpeggios, drums get instruments of their own", "Convertir un fichier MIDI en morceau NewPlayer : les accords deviennent des arpèges, la batterie a ses propres instruments" },
     { "Konvertierungstiefen: Schnell (automatisch), Gezielt (Spuren und Rollen wählen), Rundlauf (nur für von SIDiMIDI erzeugte MIDIs), Tracker (NewPlayer-Tune mit Akkord-Arpeggios und Schlagzeug, im Tracker bearbeitbar)", "Conversion depths: Quick (automatic), Targeted (choose tracks and roles), Round trip (only for MIDIs made by SIDiMIDI), Tracker (NewPlayer tune with chord arpeggios and drums, editable in the tracker)", "Profondeurs de conversion : Rapide (automatique), Ciblée (choisir pistes et rôles), Aller-retour (seulement pour les MIDI créés par SIDiMIDI), Tracker (morceau NewPlayer avec arpèges d'accords et batterie, modifiable dans le tracker)" },
+    { "Abweichung vom MIDI-Tempo: %1 % (Rasterung auf ganze Frames)", "Deviation from the MIDI tempo: %1 % (the grid is whole frames)", "Écart avec le tempo MIDI : %1 % (la grille est en frames entières)" },
     // ---- table end
 };
 
