@@ -842,10 +842,10 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     struct B { juce::TextButton* b; const char* text; std::function<void()> fn; const char* tip; };
     const B list[] = {
         { &newBtn, "Neu", [this] { confirmDiscard ([this] { newTune(); }); }, "Neuer Tune mit der Variante 20.G4 (Strg + N)" },
-        { &openBtn, "Öffnen (.np)", [this] { confirmDiscard ([this] { openFile(); }); }, "Einen Tune laden (.np, Strg + O)" },
+        { &openBtn, "Öffnen (.vtracker)", [this] { confirmDiscard ([this] { openFile(); }); }, "Einen Tune laden (.vtracker, Strg + O)" },
         { &midiInBtn, "Von MIDI …", [this] { confirmDiscard ([this] { chooseMidi(); }); }, "Eine MIDI-Datei in einen Tune umwandeln: Akkorde werden Arpeggios, Schlagzeug bekommt eigene Instrumente" },
         { &d64Btn, "Von D64 …", [this] { confirmDiscard ([this] { openD64(); }); }, "Einen Tune aus einem Diskettenabbild (.d64) laden, z. B. WORK1.D64 aus dem JCH-Paket" },
-        { &saveAsBtn, "Speichern (.np)", [this] { saveFile (true); }, "Tune als .np-Datei speichern (mit Dateiname); Strg + S speichert in die geöffnete Datei" },
+        { &saveAsBtn, "Speichern (.vtracker)", [this] { saveFile (true); }, "Tune als .vtracker-Datei speichern (mit Dateiname); Strg + S speichert in die geöffnete Datei" },
         { &sidBtn, "Speichern (.sid)", [this] { exportSid(); }, "Als .sid-Datei speichern (spielbar in jedem SID-Abspielprogramm und im SID-Archiv)" },
         { &midiBtn, "Speichern (.mid)", [this] { exportMidi(); }, "Als MIDI-Datei speichern (über die SID-nach-MIDI-Umwandlung)" },
         { &playBtn, "", [this] { play (false); }, "Von Anfang spielen (F1)" },
@@ -1080,7 +1080,7 @@ void TrackerPanel::newTune()
 void TrackerPanel::openFile()
 {
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
-    main.chooseOpenFile (T ("Tune öffnen (.np)"), start.isDirectory() ? start : juce::File(), "*.prg;*.np;*.wrk;*",
+    main.chooseOpenFile (T ("Tune öffnen (.vtracker)"), start.isDirectory() ? start : juce::File(), "*.vtracker;*.np;*.prg;*.wrk;*",
                          [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f)
     {
         if (safe == nullptr) return;
@@ -1164,8 +1164,8 @@ void TrackerPanel::saveFile (bool saveAs)
     };
     if (! saveAs && file != juce::File()) { doSave (file); return; }
     const juce::File start (main.archive().settings.getProperty ("trackerDir").toString());
-    main.chooseSaveFile (T ("Tune speichern unter"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (file != juce::File() ? file.getFileName() : "Neuer Tune.np"),
-                         "*.np;*.prg", [doSave] (const juce::File& f) { doSave (f.hasFileExtension ("np;prg") ? f : f.withFileExtension ("np")); });
+    main.chooseSaveFile (T ("Tune speichern unter"), (start.isDirectory() ? start : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)).getChildFile (file != juce::File() ? file.getFileName() : "Neuer Tune.vtracker"),
+                         "*.vtracker", [doSave] (const juce::File& f) { doSave (f.hasFileExtension ("vtracker") ? f : f.withFileExtension ("vtracker")); });
 }
 
 void TrackerPanel::exportSid()
@@ -1176,7 +1176,7 @@ void TrackerPanel::exportSid()
                          "*.sid", [safe = juce::Component::SafePointer<TrackerPanel> (this), name] (const juce::File& f)
     {
         if (safe == nullptr) return;
-        const auto psid = safe->tune.toPsid (name, "SIDiMIDI Tracker", juce::String (juce::Time::getCurrentTime().getYear()));
+        const auto psid = safe->tune.toPsid (name, "Un(d)AbtanzBAR / SIDiMIDI", juce::String (juce::Time::getCurrentTime().getYear()) + " SIDiMIDI, JCH/Vibrants");
         const auto target = f.hasFileExtension ("sid") ? f : f.withFileExtension ("sid");
         if (target.replaceWithData (psid.getData(), psid.getSize())) safe->status (T ("SID geschrieben: %1", target.getFullPathName()));
         else safe->status (T ("Schreiben nicht möglich"));
@@ -1191,7 +1191,7 @@ void TrackerPanel::exportMidi()
                          "*.mid", [safe = juce::Component::SafePointer<TrackerPanel> (this), name] (const juce::File& f)
     {
         if (safe == nullptr) return;
-        const auto psid = safe->tune.toPsid (name, "SIDiMIDI Tracker", "");
+        const auto psid = safe->tune.toPsid (name, "Un(d)AbtanzBAR / SIDiMIDI", juce::String (juce::Time::getCurrentTime().getYear()) + " SIDiMIDI, JCH/Vibrants");
         const auto tmp = juce::File::createTempFile (".sid");
         tmp.replaceWithData (psid.getData(), psid.getSize());
         const auto target = f.hasFileExtension ("mid") ? f : f.withFileExtension ("mid");
