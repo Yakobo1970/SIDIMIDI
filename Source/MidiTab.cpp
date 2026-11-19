@@ -47,6 +47,8 @@ MidiItem readItem (const juce::File& f, const juce::File& root)
     it.file = f;
     it.name = f.getFileName();
     it.folder = f.getParentDirectory() == root ? juce::String() : f.getParentDirectory().getRelativePathFrom (root).replaceCharacter ('\\', '/');
+    // an .sid with the same name next to the MIDI file is an earlier result of ours: offer it for playing
+    if (const auto sid = f.withFileExtension ("sid"); sid.existsAsFile()) it.result = sid;
     juce::FileInputStream in (f);
     juce::MidiFile mf;
     if (! in.openedOk() || ! mf.readFrom (in)) return it;
@@ -111,6 +113,8 @@ public:
         const bool hasResult = m != nullptr && m->result != juce::File();
         play.setVisible (col == mPlay || hasResult);
         play.setButtonText (juce::String::fromUTF8 ("▶"));
+        play.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
+        play.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
         play.setEnabled (ok || hasResult);
         for (auto* b : { &b1, &b2, &b3 }) b->setVisible (col == mConvert);
         resized();
@@ -169,6 +173,8 @@ public:
         convertBtn.setButtonText (T ("Konvertieren"));
         cancelBtn.setButtonText (T ("Abbrechen"));
         stopBtn.setButtonText (juce::String::fromUTF8 ("■ ") + T ("Vorhören stoppen"));
+        stopBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffd0393a));
+        stopBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
         convertBtn.onClick = [this] { run(); };
         cancelBtn.onClick = [this] { main.player().stop(); closeLater(); };
         stopBtn.onClick = [this] { main.player().stop(); };
@@ -331,6 +337,8 @@ MidiTab::MidiTab (MainComponent& m) : main (m), table ("midis", this)
     recentBtn.onClick = [this] { showRecentMenu(); };
     rescanBtn.onClick = [this] { startScan(); };
     stopBtn.onClick = [this] { stopPreview(); };
+    stopBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffd0393a));
+    stopBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
     fundusBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff3b6fd6));
     fundusBtn.onClick = [] { juce::URL (AboutPanel::kMidiFundusUrl).launchInDefaultBrowser(); };
     subfolders.setToggleState ((bool) main.archive().settings.getProperty ("midiSubfolders", true), juce::dontSendNotification);
@@ -339,6 +347,8 @@ MidiTab::MidiTab (MainComponent& m) : main (m), table ("midis", this)
     search.setIndents (6, 4);
     applyLanguage();
 
+    for (const auto& line : juce::StringArray::fromLines (main.archive().settings.getProperty ("sidResults").toString()))
+        if (const int tab = line.indexOfChar ('\t'); tab > 0) knownResults[line.substring (0, tab)] = line.substring (tab + 1);
     const juce::File last (main.archive().settings.getProperty ("midiFolder").toString());
     if (last.isDirectory()) openFolder (last);
     startTimerHz (10);
@@ -516,7 +526,14 @@ void MidiTab::timerCallback()
     }
     if (! got.empty())
     {
-        for (auto& g : got) items.push_back (std::move (g));
+        for (auto& g : got)
+        {
+            // results written to another folder: known from the list of earlier conversions
+            if (g.result == juce::File())
+                if (auto it = knownResults.find (g.file.getFullPathName()); it != knownResults.end() && juce::File (it->second).existsAsFile())
+                    g.result = juce::File (it->second);
+            items.push_back (std::move (g));
+        }
         rebuildShown();
     }
     else if (scanFinished && scan != nullptr)
@@ -716,6 +733,17 @@ void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const st
     });
 }
 
+void MidiTab::rememberResult (const juce::File& midi, const juce::File& sid)
+{
+    knownResults[midi.getFullPathName()] = sid.getFullPathName();
+    juce::String all;
+    int n = 0;
+    for (auto it = knownResults.rbegin(); it != knownResults.rend() && n < 5000; ++it, ++n)
+        all << it->first << "\t" << it->second << "\n";
+    main.archive().settings.setProperty ("sidResults", all, nullptr);
+    main.notifySettings();
+}
+
 void MidiTab::runConversion (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip, const juce::File& target)
 {
     const auto* m = item (idx);
@@ -740,7 +768,11 @@ void MidiTab::runConversion (int idx, const std::array<int, 3>& tracks, const st
             if (safe == nullptr) return;
             if (ok)
             {
-                if (idx >= 0 && idx < (int) safe->items.size()) safe->items[(size_t) idx].result = target;
+                if (idx >= 0 && idx < (int) safe->items.size())
+                {
+                    safe->items[(size_t) idx].result = target;
+                    safe->rememberResult (safe->items[(size_t) idx].file, target);
+                }
                 safe->lastMessage = T ("SID geschrieben: %1", target.getFileName());
                 safe->main.setStatus (T ("SID geschrieben: %1", target.getFullPathName()));
                 auto& a = safe->main.archive();

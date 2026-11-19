@@ -654,7 +654,8 @@ void SidTable::cellClicked (int row, int col, const juce::MouseEvent& e)
 
 void SidTable::cellDoubleClicked (int row, int col, const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu() || col == cFav || col == cRating || isEditableCol (col)) return;
+    if (e.mods.isPopupMenu() || col == cFav || col == cRating) return;
+    pendingId = 0; clickTimer.stopTimer();   // no field opens after a double click
     if (onPlay) onPlay (rowEntry (row));
 }
 
@@ -744,6 +745,8 @@ struct SidTable::CellEditor : juce::TextEditor
 {
     std::function<bool (const juce::KeyPress&)> onKey;
     std::function<void()> onClick;
+    std::function<bool()> onDoubleClick;   // true = handled (the tune plays), else the usual word selection
+    void mouseDoubleClick (const juce::MouseEvent& e) override { if (! (onDoubleClick && onDoubleClick())) juce::TextEditor::mouseDoubleClick (e); }
     bool keyPressed (const juce::KeyPress& k) override { return (onKey && onKey (k)) || juce::TextEditor::keyPressed (k); }
     void mouseDown (const juce::MouseEvent& e) override { if (onClick) onClick(); juce::TextEditor::mouseDown (e); }
 };
@@ -843,6 +846,20 @@ void SidTable::startEdit (int row, int col, const juce::String& typed)
     auto ce = std::make_unique<CellEditor>();
     ce->onKey = [this] (const juce::KeyPress& k) { return editorKey (k); };
     ce->onClick = [this] { caretMode = true; };
+    // a double click on a field nobody has typed into plays the tune, like a double click on any other cell
+    ce->onDoubleClick = [this]
+    {
+        if (editor == nullptr || editor->getText() != editOriginal) return false;
+        const int id = editId;
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<SidTable> (this), id]
+        {
+            if (safe == nullptr) return;
+            safe->finishEdit (false);
+            safe->table.grabKeyboardFocus();
+            if (auto* en = safe->arch.byId (id); en != nullptr && safe->onPlay) safe->onPlay (en);
+        });
+        return true;
+    };
     caretMode = false;
     editor = std::move (ce);
     editor->setFont (ui::font (13.0f));

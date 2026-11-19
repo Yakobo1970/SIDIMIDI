@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <atomic>
 #include <array>
+#include <map>
 #include <thread>
 #include "Look.h"
 #include "Lang.h"
@@ -73,6 +74,8 @@ private:
     int playingItem = -1;
     juce::String lastMessage;
 
+    std::map<juce::String, juce::String> knownResults;   // MIDI path -> the .sid we wrote from it (also in other folders)
+    void rememberResult (const juce::File& midi, const juce::File& sid);
     void startScan();
     void stopScan();
     void rebuildShown();

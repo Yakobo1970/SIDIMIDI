@@ -83,6 +83,15 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     addAndMakeVisible (search);
     playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
     stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
+    // player buttons in colour: play / pause green, stop red
+    for (auto* b : { &playBtn, &stopBtn })
+    {
+        const auto c = b == &playBtn ? juce::Colour (0xff2f9e44) : juce::Colour (0xffd0393a);
+        b->setColour (juce::TextButton::buttonColourId, c);
+        b->setColour (juce::TextButton::buttonOnColourId, c);
+        b->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        b->setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    }
     search.setFont (font (14.0f));
     search.setIndents (6, 4);
     search.onTextChange = [this] { list.setGlobalSearch (search.getText()); updateButtons(); };
