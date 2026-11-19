@@ -476,6 +476,22 @@ ROWS = [
 ('Ab der Cursor-Position spielen (F2)', 'Play from the cursor position (F2)', 'Jouer depuis la position du curseur (F2)'),
 ('Stopp (Esc)', 'Stop (Esc)', 'Arrêt (Échap)'),
 ("Puls", "Pulse", "Pulse"),
+# ---- MIDI -> NewPlayer
+('Umwandlung in einen NewPlayer-Tune von JCH: Akkorde als Arpeggio, Schlagzeug mit eigenen Klängen, Puls und Hard-Restart. Der Tune öffnet sich im Tracker (dort Anhören, Bearbeiten, Export als SID oder MIDI)', 'Conversion into a NewPlayer tune of JCH: chords as arpeggios, drums with their own sounds, pulse and hard restart. The tune opens in the tracker (listen, edit, export as SID or MIDI there)', "Conversion en morceau NewPlayer de JCH : accords en arpèges, batterie avec ses propres sons, pulse et hard restart. Le morceau s'ouvre dans le tracker (écoute, édition, export en SID ou MIDI)"),
+('MIDI → NewPlayer: Tempo %1 BPM, Tune-Tempo %2 (eine Zeile = ein Sechzehntel)', 'MIDI → NewPlayer: tempo %1 BPM, tune speed %2 (one row = one sixteenth)', 'MIDI → NewPlayer : tempo %1 BPM, tempo du morceau %2 (une ligne = une double croche)'),
+('Stimme %1: %2', 'Voice %1: %2', 'Voix %1 : %2'),
+('leer', 'empty', 'vide'),
+('%1 Akkorde als Arpeggio, %2 Schlagzeug-Anschläge, %3 Instrumente, %4 Sequenzen', '%1 chords as arpeggio, %2 drum hits, %3 instruments, %4 sequences', '%1 accords en arpège, %2 coups de batterie, %3 instruments, %4 séquences'),
+('Der Tune war zu lang für 112 Sequenzen und wurde nach %1 Zeilen gekürzt', 'The tune was too long for 112 sequences and was cut after %1 rows', 'Le morceau était trop long pour 112 séquences et a été coupé après %1 lignes'),
+('Es gibt mehr als 31 Klangvarianten: die übrigen bekamen das erste Instrument', 'There are more than 31 sound variants: the rest got the first instrument', 'Il y a plus de 31 variantes de son : les autres ont reçu le premier instrument'),
+('Die Arpeggio-Tabelle ist voll: manche Akkorde fehlen', 'The arpeggio table is full: some chords are missing', "La table d'arpèges est pleine : certains accords manquent"),
+('MIDI-Datei in einen NewPlayer-Tune umwandeln', 'Convert a MIDI file into a NewPlayer tune', 'Convertir un fichier MIDI en morceau NewPlayer'),
+('MIDI umgewandelt: %1', 'MIDI converted: %1', 'MIDI converti : %1'),
+('MIDI → NewPlayer', 'MIDI → NewPlayer', 'MIDI → NewPlayer'),
+('Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten.', 'The tune is not saved yet. Press F1 to listen; sounds and tables can be edited on the right.', "Le morceau n'est pas encore enregistré. Appuyez sur F1 pour l'écouter ; les sons et les tables se modifient à droite."),
+('Von MIDI …', 'From MIDI …', 'Depuis MIDI …'),
+('Eine MIDI-Datei in einen NewPlayer-Tune umwandeln: Akkorde werden Arpeggios, Schlagzeug bekommt eigene Instrumente', 'Convert a MIDI file into a NewPlayer tune: chords become arpeggios, drums get instruments of their own', 'Convertir un fichier MIDI en morceau NewPlayer : les accords deviennent des arpèges, la batterie a ses propres instruments'),
+('Konvertierungstiefen: Schnell (automatisch), Gezielt (Spuren und Rollen wählen), Rundlauf (nur für von SIDiMIDI erzeugte MIDIs), Tracker (NewPlayer-Tune mit Akkord-Arpeggios und Schlagzeug, im Tracker bearbeitbar)', 'Conversion depths: Quick (automatic), Targeted (choose tracks and roles), Round trip (only for MIDIs made by SIDiMIDI), Tracker (NewPlayer tune with chord arpeggios and drums, editable in the tracker)', "Profondeurs de conversion : Rapide (automatique), Ciblée (choisir pistes et rôles), Aller-retour (seulement pour les MIDI créés par SIDiMIDI), Tracker (morceau NewPlayer avec arpèges d'accords et batterie, modifiable dans le tracker)"),
 ]
 
 def esc(s):

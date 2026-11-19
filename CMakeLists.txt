@@ -19,7 +19,8 @@ set(SM_CORE
     Source/SevenZip.cpp
     Source/Ppmd7.cpp
     Source/HvscUpdate.cpp
-    Source/NpTune.cpp)
+    Source/NpTune.cpp
+    Source/NpFromMidi.cpp)
 
 set(SM_DEFS
     JUCE_WEB_BROWSER=0

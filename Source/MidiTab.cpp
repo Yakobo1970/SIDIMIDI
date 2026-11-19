@@ -18,7 +18,7 @@ struct MidiColDef { int id; const char* name; int width; bool numeric; const cha
 const MidiColDef kMidiCols[] = {
     { mPlay,    "▶",             38,  false, "MIDI-Datei vorhören (über den Windows-GM-Synth)" },
     { mName,    "Datei",         215, false, "Dateiname" },
-    { mConvert, "Konvertieren",  272, false, "Konvertierungstiefen: Schnell (automatisch), Gezielt (Spuren und Rollen wählen), Rundlauf (nur für von SIDiMIDI erzeugte MIDIs)" },
+    { mConvert, "Konvertieren",  360, false, "Konvertierungstiefen: Schnell (automatisch), Gezielt (Spuren und Rollen wählen), Rundlauf (nur für von SIDiMIDI erzeugte MIDIs), Tracker (NewPlayer-Tune mit Akkord-Arpeggios und Schlagzeug, im Tracker bearbeitbar)" },
     { mTracks,  "Spuren",        54,  true,  "Spuren mit Noten" },
     { mNotes,   "Noten",         58,  true,  "Anzahl der Noten" },
     { mLength,  "Länge",         56,  true,  "Spieldauer" },
@@ -82,10 +82,11 @@ class MidiCell : public juce::Component
 public:
     MidiCell (MidiTab& t, int c) : tab (t), col (c)
     {
-        for (auto* b : { &b1, &b2, &b3 }) addAndMakeVisible (b);
+        for (auto* b : { &b1, &b2, &b3, &b4 }) addAndMakeVisible (b);
         b1.onClick = [this] { tab.convert (item, MidiTab::Depth::quick); };
         b2.onClick = [this] { tab.convert (item, MidiTab::Depth::targeted); };
         b3.onClick = [this] { tab.convert (item, MidiTab::Depth::roundTrip); };
+        b4.onClick = [this] { tab.convert (item, MidiTab::Depth::tracker); };
         play.onClick = [this] { if (col == mPlay) tab.playMidi (item); else tab.playSidResult (item); };
         addAndMakeVisible (play);
     }
@@ -98,17 +99,20 @@ public:
         b1.setButtonText (T ("Schnell"));
         b2.setButtonText (T ("Gezielt …"));
         b3.setButtonText (T ("Rundlauf"));
+        b4.setButtonText (T ("Tracker"));
+        b4.setTooltip (T ("Umwandlung in einen NewPlayer-Tune von JCH: Akkorde als Arpeggio, Schlagzeug mit eigenen Klängen, Puls und Hard-Restart. Der Tune öffnet sich im Tracker (dort Anhören, Bearbeiten, Export als SID oder MIDI)"));
         b1.setTooltip (T ("Automatisch: die drei notenreichsten Spuren, Klang nach GM-Programm"));
         b2.setTooltip (T ("Spuren und Rollen selbst wählen und vorhören"));
         b3.setTooltip (T ("Nur für MIDIs, die SIDiMIDI aus einer SID-Datei erzeugt hat: Spur 1–3 direkt zurückwandeln"));
-        b1.setEnabled (ok); b2.setEnabled (ok); b3.setEnabled (ok && m->roundTrip);
+        b1.setEnabled (ok); b2.setEnabled (ok); b3.setEnabled (ok && m->roundTrip); b4.setEnabled (ok);
         {
             auto* l = dynamic_cast<ui::Look*> (&getLookAndFeel());
             const auto& th = l != nullptr ? l->theme() : themes()[0];
             b1.setColour (juce::TextButton::buttonColourId, th.track[2].withMultipliedBrightness (0.55f));
             b2.setColour (juce::TextButton::buttonColourId, th.track[1].withMultipliedBrightness (0.55f));
             b3.setColour (juce::TextButton::buttonColourId, th.track[0].withMultipliedBrightness (0.55f));
-            for (auto* b : { &b1, &b2, &b3 }) b->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            b4.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
+            for (auto* b : { &b1, &b2, &b3, &b4 }) b->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
         }
         const bool hasResult = m != nullptr && m->result != juce::File();
         play.setVisible (col == mPlay || hasResult);
@@ -116,7 +120,7 @@ public:
         play.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
         play.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
         play.setEnabled (ok || hasResult);
-        for (auto* b : { &b1, &b2, &b3 }) b->setVisible (col == mConvert);
+        for (auto* b : { &b1, &b2, &b3, &b4 }) b->setVisible (col == mConvert);
         resized();
         repaint();
     }
@@ -126,10 +130,11 @@ public:
         auto r = getLocalBounds().reduced (2, 2);
         if (col == mConvert)
         {
-            const int w = (r.getWidth() - 8) / 3;
+            const int w = (r.getWidth() - 12) / 4;
             b1.setBounds (r.removeFromLeft (w)); r.removeFromLeft (4);
             b2.setBounds (r.removeFromLeft (w)); r.removeFromLeft (4);
-            b3.setBounds (r);
+            b3.setBounds (r.removeFromLeft (w)); r.removeFromLeft (4);
+            b4.setBounds (r);
         }
         else if (col == mPlay) play.setBounds (r.withSizeKeepingCentre (std::min (30, r.getWidth()), r.getHeight()));
         else play.setBounds (r.removeFromLeft (28));
@@ -149,7 +154,7 @@ public:
 
     MidiTab& tab;
     int col, item = -1;
-    juce::TextButton b1, b2, b3, play;
+    juce::TextButton b1, b2, b3, b4, play;
 };
 
 // ================================================================================================ track panel ("Gezielt")
@@ -689,6 +694,12 @@ void MidiTab::convert (int idx, Depth depth)
     if (m == nullptr || ! m->valid) return;
     main.player().stop();
     playingItem = -1;
+    if (depth == Depth::tracker)
+    {
+        main.openTracker();
+        if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file);
+        return;
+    }
     juce::String log;
     bool round = false;
     std::array<MidiToSidCoreEngine::ChannelSuggestion, 3> sug;

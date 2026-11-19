@@ -6,6 +6,7 @@
 #include "SidInfo.h"
 #include "SidTrace.h"
 #include "SidToMidiCore.h"
+#include "NpFromMidi.h"
 #include "SidView.h"
 #include <BinaryData.h>
 
@@ -180,6 +181,8 @@ public:
     void newTune();
     void openFile();
     void openD64();
+    void importMidi (const juce::File& midi);
+    void chooseMidi();
     void saveFile (bool saveAs);
     void exportSid();
     void exportMidi();
@@ -198,7 +201,7 @@ public:
     GridView* grid = nullptr;
 
 private:
-    juce::TextButton tabButtons[5], voiceMute[3], newBtn, openBtn, d64Btn, saveBtn, saveAsBtn, sidBtn, midiBtn, playBtn, cursorBtn, stopBtn,
+    juce::TextButton tabButtons[5], voiceMute[3], newBtn, openBtn, d64Btn, saveBtn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, cursorBtn, stopBtn,
                      octMinus, octPlus, spdMinus, spdPlus;
     juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel;
     std::unique_ptr<PatternView> patternPtr;
@@ -838,6 +841,7 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     const B list[] = {
         { &newBtn, "Neu", [this] { confirmDiscard ([this] { newTune(); }); }, "Neuer Tune mit dem Player v20.G4 (Strg + N)" },
         { &openBtn, "Öffnen …", [this] { confirmDiscard ([this] { openFile(); }); }, "Einen Tune des NewPlayer-Editors laden (Strg + O)" },
+        { &midiInBtn, "Von MIDI …", [this] { confirmDiscard ([this] { chooseMidi(); }); }, "Eine MIDI-Datei in einen NewPlayer-Tune umwandeln: Akkorde werden Arpeggios, Schlagzeug bekommt eigene Instrumente" },
         { &d64Btn, "Von D64 …", [this] { confirmDiscard ([this] { openD64(); }); }, "Einen Tune aus einem Diskettenabbild (.d64) laden, z. B. WORK1.D64 aus dem JCH-Paket" },
         { &saveBtn, "Speichern", [this] { saveFile (false); }, "Tune speichern (Strg + S)" },
         { &saveAsBtn, "Speichern unter …", [this] { saveFile (true); }, "Tune unter neuem Namen speichern" },
@@ -1125,6 +1129,25 @@ void TrackerPanel::openD64()
     });
 }
 
+void TrackerPanel::chooseMidi()
+{
+    const juce::File start (main.archive().settings.getProperty ("lastMidiFolder").toString());
+    main.chooseOpenFile (T ("MIDI-Datei in einen NewPlayer-Tune umwandeln"), start.isDirectory() ? start : juce::File(), "*.mid;*.midi;*.kar;*.rmi",
+                         [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f) { if (safe != nullptr) safe->importMidi (f); });
+}
+
+void TrackerPanel::importMidi (const juce::File& midi)
+{
+    stop();
+    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize);
+    if (! r.ok) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", r.report); return; }
+    loadTune (r.tune, {});
+    dirty = true;                                   // not saved yet
+    window.setName (T ("Tracker") + " – " + midi.getFileNameWithoutExtension() + " *");
+    status (T ("MIDI umgewandelt: %1", midi.getFileName()));
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("MIDI → NewPlayer"), r.report + "\n\n" + T ("Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten."));
+}
+
 void TrackerPanel::saveFile (bool saveAs)
 {
     auto doSave = [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f)
@@ -1183,7 +1206,7 @@ void TrackerPanel::resized()
 {
     auto r = getLocalBounds().reduced (8);
     auto row1 = r.removeFromTop (28);
-    for (auto* b : { &newBtn, &openBtn, &d64Btn, &saveBtn, &saveAsBtn, &sidBtn, &midiBtn })
+    for (auto* b : { &newBtn, &openBtn, &d64Btn, &midiInBtn, &saveBtn, &saveAsBtn, &sidBtn, &midiBtn })
     {
         const int w = juce::jlimit (60, 150, juce::GlyphArrangement::getStringWidthInt (font (14.0f), b->getButtonText()) + 26);
         b->setBounds (row1.removeFromLeft (w));
@@ -1245,9 +1268,19 @@ TrackerWindow::TrackerWindow (MainComponent& m)
     content->pattern->grabKeyboardFocus();
 }
 
+void TrackerWindow::importMidiFile (const juce::File& midi)
+{
+    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi] { if (safe != nullptr) safe->content->importMidi (midi); });
+}
+
 void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bool play, const juce::String& keys, const juce::File& exportSid)
 {
-    if (tune.existsAsFile())
+    if (tune.existsAsFile() && tune.hasFileExtension ("mid;midi"))
+    {
+        auto r = npImportMidi (tune, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize);
+        if (r.ok) content->loadForTest (r.tune, {});
+    }
+    else if (tune.existsAsFile())
     {
         NpTune t; juce::String err;
         if (t.loadFile (tune, err)) content->loadForTest (t, tune);

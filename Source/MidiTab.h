@@ -39,7 +39,7 @@ public:
     void stopPreview();
 
     // conversion (also used by the track panel)
-    enum class Depth { quick, targeted, roundTrip };
+    enum class Depth { quick, targeted, roundTrip, tracker };
     void convert (int itemIndex, Depth depth);
     void convertTracks (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip);
     void playMidi (int itemIndex);

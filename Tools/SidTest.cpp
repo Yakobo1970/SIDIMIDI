@@ -13,6 +13,7 @@
 #include "../Source/SidToMidiCore.h"
 #include "../Source/MidiToSidCore.h"
 #include "../Source/NpTune.h"
+#include "../Source/NpFromMidi.h"
 #include <iostream>
 
 using namespace sm;
@@ -298,6 +299,34 @@ int main (int argc, char** argv)
         if (tr) for (int v = 0; v < 3; ++v) for (juce::uint32 i = 0; i < tr->frames; ++i) act[v] += tr->v[v].note[i] >= 0;
         if (tr) { juce::String seq; float last = -9; for (juce::uint32 i = 0; i < tr->frames && seq.length() < 80; ++i) { const float n = tr->v[0].note[i]; if (n >= 0 && std::abs (n - last) > 0.4f) { seq << juce::String (n, 1) << " "; last = n; } } out ("voice 1 notes: " + seq); }
         out ("trace frames " + juce::String (tr ? (int) tr->frames : 0) + " sounding frames per voice " + juce::String (act[0]) + "/" + juce::String (act[1]) + "/" + juce::String (act[2]) + " note range " + juce::String (tr ? tr->minNote : 0) + ".." + juce::String (tr ? tr->maxNote : 0));
+        return 0;
+    }
+
+    if (cmd == "mid2np" && argc > 4)
+    {
+        // SidTest mid2np <template.prg> <in.mid> <out.sid> [out.np]: MIDI -> NewPlayer tune, exports it and plays it in the emulator
+        juce::MemoryBlock tpl;
+        if (! juce::File (juce::String::fromUTF8 (argv[2])).loadFileAsData (tpl)) { out ("template not found"); return 1; }
+        auto r = npImportMidi (juce::File (juce::String::fromUTF8 (argv[3])), tpl.getData(), tpl.getSize());
+        out (r.report);
+        if (! r.ok) return 1;
+        const auto psid = r.tune.toPsid ("MIDI import", "SIDiMIDI", "");
+        juce::File (juce::String::fromUTF8 (argv[4])).replaceWithData (psid.getData(), psid.getSize());
+        if (argc > 5) { juce::String e; r.tune.saveFile (juce::File (juce::String::fromUTF8 (argv[5])), e); }
+        const auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
+        const double secs = std::min (60.0, r.tune.estimateSeconds() + 1.0);
+        auto tr = computeTrace (si, 1, secs);
+        int act[3] = {}; float lo = 200, hi = -1;
+        if (tr) for (int v = 0; v < 3; ++v) for (juce::uint32 i = 0; i < tr->frames; ++i) { act[v] += tr->v[v].note[i] >= 0; }
+        out ("estimated " + juce::String (r.tune.estimateSeconds(), 1) + " s; trace " + juce::String (tr ? (int) tr->frames : 0) + " frames, sounding per voice " + juce::String (act[0]) + "/" + juce::String (act[1]) + "/" + juce::String (act[2]) + "  size " + juce::String ((int) psid.getSize()));
+        (void) lo; (void) hi;
+        if (tr)
+            for (int v = 0; v < 3; ++v)
+            {
+                juce::String seq; float last = -9;
+                for (juce::uint32 i = 0; i < tr->frames && seq.length() < 120; ++i) { const float n = tr->v[v].note[i]; if (n >= 0 && std::abs (n - last) > 0.4f) { seq << juce::String (n, 0) << " "; last = n; } }
+                out ("voice " + juce::String (v + 1) + ": " + seq);
+            }
         return 0;
     }
 
