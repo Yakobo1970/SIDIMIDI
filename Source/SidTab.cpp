@@ -167,7 +167,7 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     zoomReset.onClick = [this] { graph.resetZoom(); };
     onlyFav.onClick = [this] { list.setOnlyFavourites (onlyFav.getToggleState()); updateButtons(); };
     repeatBtn.setToggleState ((bool) arch.settings.getProperty ("repeatTune", false), juce::dontSendNotification);
-    repeatBtn.onClick = [this] { arch.settings.setProperty ("repeatTune", repeatBtn.getToggleState(), nullptr); arch.settingsChanged(); };
+    repeatBtn.onClick = [this] { arch.settings.setProperty ("repeatTune", repeatBtn.getToggleState(), nullptr); arch.settingsChanged(); applyPlayRange(); };
     songBox.onChange = [this] { onSongChosen(); };
 
     list.onSelect = [this] (Entry* e) { onSelectionChanged (e); };
@@ -557,9 +557,19 @@ void SidTab::startPlayback (juce::uint32 frame)
     for (int v = 0; v < 3; ++v) pl.setVoiceMuted (v, graph.laneMuted (v));
     paused = false;
     pl.playTrace (*t->events, t->fps, t->frames, frame, graph.info().ntsc());
+    applyPlayRange();
     list.showPlayingRow (playingId);
     main.setStatus ({});
     updateButtons();
+}
+
+void SidTab::applyPlayRange()
+{
+    auto& pl = main.player();
+    if (playingId == 0 || ! pl.hasSidTrace()) return;
+    const auto* e = arch.byId (playingId);
+    const double len = e != nullptr ? e->lengthOf (playingSong > 0 ? playingSong : e->startSong) : 0.0;
+    pl.setSidPlayRange (len > 0 ? (juce::uint32) std::lround (len * pl.getFramesPerSecond()) : 0u, repeatBtn.getToggleState());
 }
 
 void SidTab::togglePlay()

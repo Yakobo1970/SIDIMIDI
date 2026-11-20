@@ -76,6 +76,7 @@ public:
     void stopPlayback();
     bool isPlaying() const;
     void playNext (int delta, bool wrap = false);
+    void applyPlayRange();              // the song length ends the playback; with repeat it starts again at once (no pause)
     void stepTune (int delta);          // previous / next tune of the list (plays it when something is playing); repeat stays as set
     void stepSong (int delta);          // previous / next song (sub-tune) of the selected tune
 

@@ -359,6 +359,32 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    if (cmd == "looptest" && argc > 2)
+    {
+        // SidTest looptest <file.sid> <seconds of the loop>: offline player with repeat - the frame counter must wrap without the tune ending
+        const auto si = parseSidFile (juce::File (juce::String::fromUTF8 (argv[2])));
+        const double loopSecs = juce::String (argv[3]).getDoubleValue();
+        auto t = computeTrace (si, 1, loopSecs + 2.0);
+        AudioPlayerEngine pl (false);
+        pl.prepareToPlay (512, 44100.0);
+        pl.playTrace (*t->events, t->fps, t->frames, 0, si.ntsc());
+        pl.setSidPlayRange ((juce::uint32) std::lround (loopSecs * t->fps), true);
+        juce::AudioBuffer<float> buf (2, 512);
+        juce::uint32 maxFrame = 0; int wraps = 0; juce::uint32 last = 0; double quiet = 0; int quietBlocks = 0, blocks = 0;
+        for (int b = 0; b < (int) (44100.0 * (loopSecs * 3.5) / 512.0); ++b)
+        {
+            buf.clear();
+            pl.getNextAudioBlock ({ &buf, 0, 512 });
+            const auto f = pl.getPlayFrame();
+            if (f < last) ++wraps;
+            last = f; maxFrame = std::max (maxFrame, f);
+            ++blocks;
+        }
+        out ("loop " + juce::String (loopSecs, 1) + " s -> max frame " + juce::String ((int) maxFrame) + " (loop end " + juce::String ((int) std::lround (loopSecs * t->fps)) + "), wraps " + juce::String (wraps) + ", still playing " + juce::String ((int) pl.isSidTunePlaying()) + ", finished " + juce::String ((int) pl.takeSidFinished()));
+        (void) quiet; (void) quietBlocks; (void) blocks;
+        return 0;
+    }
+
     if (cmd == "tracesample" && argc > 2)
     {
         // SidTest tracesample <folder> [max]: emulates the start song of many files (10 s) and counts problems

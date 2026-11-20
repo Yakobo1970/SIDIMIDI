@@ -165,6 +165,8 @@ public:
         sidClockHz = ntsc ? 1022727.0f : 985248.0f;
         framesPerSecond = juce::jlimit(10.0, 400.0, fps);
         traceTotalFrames = juce::jmax(1u, totalFrames);
+        traceEndFrame = 0;
+        traceLoop = false;
         sidFinished = false;
         isSidPlaying = true;
         isMidiPlaying = false;
@@ -194,6 +196,9 @@ public:
     bool     isSidTunePlaying() const { const juce::ScopedLock sl(lock); return isSidPlaying; }
     // true once after a tune played to its end (then reset)
     bool     takeSidFinished() { const juce::ScopedLock sl(lock); const bool f = sidFinished; sidFinished = false; return f; }
+    // where the tune ends (0 = at the end of the trace) and whether it then starts again at once, inside the audio thread
+    // and without a pause (repeat): the song length of the HVSC is the loop point
+    void     setSidPlayRange(uint32_t endFrame, bool loop) { const juce::ScopedLock sl(lock); traceEndFrame = endFrame; traceLoop = loop; }
     // pause/resume of a SID tune started with playTrace()
     void     setSidPaused(bool paused) { const juce::ScopedLock sl(lock); if (traceTotalFrames > 0) isSidPlaying = ! paused; }
     bool     hasSidTrace() const { const juce::ScopedLock sl(lock); return traceTotalFrames > 0 && ! traceEvents.empty(); }
@@ -485,6 +490,8 @@ public:
         currentFrameCounter = 0;
         traceEvents.clear();
         traceTotalFrames = 0;
+        traceEndFrame = 0;
+        traceLoop = false;
         framesPerSecond = 50.125;
 
         midiEvents.clear();
@@ -682,10 +689,15 @@ private:
         if (traceTotalFrames > 0)
         {
             // a precomputed trace (playTrace): the tune ends at its known length
-            if ((uint32_t) currentFrameCounter >= traceTotalFrames)
+            const uint32_t endFrame = traceEndFrame > 0 ? juce::jmin(traceEndFrame, traceTotalFrames) : traceTotalFrames;
+            if ((uint32_t) currentFrameCounter >= endFrame)
             {
-                isSidPlaying = false;
-                sidFinished = true;
+                if (traceLoop) seekLocked(0);               // repeat: straight back to the beginning
+                else
+                {
+                    isSidPlaying = false;
+                    sidFinished = true;
+                }
             }
         }
         else if (currentEventIndex >= traceEvents.size())
@@ -980,6 +992,8 @@ private:
     float    sidClockHz = 985248.0f;     // PAL or NTSC system clock (pitch of the SID oscillators)
     std::atomic<int>   voiceMuteMask { 0 };   // bit n = voice n+1 muted
     std::atomic<float> outputGain { 1.0f };   // user volume
+    uint32_t traceEndFrame = 0;          // 0 = traceTotalFrames
+    bool     traceLoop = false;
     uint32_t traceTotalFrames = 0;       // > 0: tune from playTrace(), ends after this many frames
     bool     sidFinished = false;
     double   currentSampleRate = 44100.0;
