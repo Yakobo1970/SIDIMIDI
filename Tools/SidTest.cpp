@@ -14,6 +14,7 @@
 #include "../Source/MidiToSidCore.h"
 #include "../Source/NpTune.h"
 #include "../Source/NpFromMidi.h"
+#include "../Source/InstrumentPool.h"
 #include <iostream>
 
 using namespace sm;
@@ -300,6 +301,53 @@ int main (int argc, char** argv)
         if (tr) { juce::String seq; float last = -9; for (juce::uint32 i = 0; i < tr->frames && seq.length() < 80; ++i) { const float n = tr->v[0].note[i]; if (n >= 0 && std::abs (n - last) > 0.4f) { seq << juce::String (n, 1) << " "; last = n; } } out ("voice 1 notes: " + seq); }
         out ("trace frames " + juce::String (tr ? (int) tr->frames : 0) + " sounding frames per voice " + juce::String (act[0]) + "/" + juce::String (act[1]) + "/" + juce::String (act[2]) + " note range " + juce::String (tr ? tr->minNote : 0) + ".." + juce::String (tr ? tr->maxNote : 0));
         return 0;
+    }
+
+    if (cmd == "pooltest" && argc > 2)
+    {
+        // SidTest pooltest <template.prg>: loads every factory preset into the tune (checks room and round trip) and plays a few
+        juce::MemoryBlock tpl;
+        if (! juce::File (juce::String::fromUTF8 (argv[2])).loadFileAsData (tpl)) { out ("template not found"); return 1; }
+        NpTune t; juce::String err;
+        t.loadPrg (tpl.getData(), tpl.getSize(), err);
+        t.makeStarter();
+        const auto fac = InstrumentPool::factoryPresets();
+        out ("factory presets: " + juce::String ((int) fac.size()) + ", player " + t.playerName());
+        int slot = 6, bad = 0;
+        for (auto& p : fac)
+        {
+            juce::String e;
+            if (! InstrumentPool::apply (t, slot, p, e)) { out ("FAILED " + p.name + ": " + e); ++bad; continue; }
+            const auto back = InstrumentPool::capture (t, slot, p.name, p.category);
+            const bool sameProg = back.arpOn.rows.size() == p.arpOn.rows.size() && back.pulseSets.size() == p.pulseSets.size();
+            if (! sameProg) { out ("ROUND TRIP differs: " + p.name); ++bad; }
+            if (++slot > 31) slot = 6;
+        }
+        int arpTop = 0; for (int r = 255; r >= 0; --r) if (t.get (NpTune::tabArpeggio, r, 0) || t.get (NpTune::tabArpeggio, r, 1)) { arpTop = r + 1; break; }
+        int pulTop = 0; for (int r = 63; r >= 0; --r) if (t.get (NpTune::tabPulse, r, 0) || t.get (NpTune::tabPulse, r, 1) || t.get (NpTune::tabPulse, r, 2) || t.get (NpTune::tabPulse, r, 3)) { pulTop = r + 1; break; }
+        out ("arpeggio rows used " + juce::String (arpTop) + " of 256, pulse sets " + juce::String (pulTop) + " of 64, problems " + juce::String (bad));
+        // the same preset twice does not grow the tables
+        { juce::String e; InstrumentPool::apply (t, 7, fac[1], e); InstrumentPool::apply (t, 8, fac[1], e);
+          int a2 = 0; for (int r = 255; r >= 0; --r) if (t.get (NpTune::tabArpeggio, r, 0) || t.get (NpTune::tabArpeggio, r, 1)) { a2 = r + 1; break; }
+          out ("after loading a preset twice: arpeggio rows " + juce::String (a2)); }
+        for (const char* name : { "Kick", "Puls (PWM)", "Dur", "Hi-Hat offen" })
+        {
+            for (auto& p : fac) if (p.name == name)
+            {
+                NpTune u; u.loadPrg (tpl.getData(), tpl.getSize(), err); u.makeStarter();
+                juce::String e; InstrumentPool::apply (u, 9, p, e);
+                std::vector<NpRow> rows (16); rows[0].cmd = 0xa0 + 9; rows[0].note = 48;
+                u.setSequence (1, rows);
+                const auto psid = u.toPsid ("pool", "SIDiMIDI", "");
+                const auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
+                auto tr = computeTrace (si, 1, 1.5);
+                int act = 0; juce::String ns;
+                if (tr) for (juce::uint32 i = 0; i < tr->frames; ++i) { if (tr->v[0].note[i] >= 0) ++act; }
+                if (tr) { float last = -9; for (juce::uint32 i = 0; i < tr->frames && ns.length() < 70; ++i) { const float n = tr->v[0].note[i]; if (n >= 0 && std::abs (n - last) > 0.4f) { ns << juce::String (n, 0) << " "; last = n; } } }
+                out (juce::String (name) + ": sounding frames " + juce::String (act) + "  notes " + ns);
+            }
+        }
+        return bad;
     }
 
     if (cmd == "mid2np" && argc > 4)

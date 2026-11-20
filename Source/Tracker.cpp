@@ -10,6 +10,7 @@
 #include "SidView.h"
 #include <BinaryData.h>
 #include <map>
+#include "InstrumentPool.h"
 #include <set>
 
 namespace sm
@@ -282,6 +283,13 @@ public:
     void cutSel();
     void applyPlayRange();
     void recordForTest() { recBtn.setToggleState (true, juce::dontSendNotification); updateRecColour(); }
+    // ---- instrument pool and the instrument of the keyboard
+    int kbInstr = -1;                               // instrument the keyboard plays and writes (-1: the one at the cursor)
+    void toggleKbInstrument (int row);
+    void showInstrumentMenu (int row, juce::Point<int> screen);
+    void saveInstrumentDialog (int row);
+    void loadPreset (int row, const InstrumentPreset& p);
+    void kbInstrumentForTest (int row) { kbInstr = row; }
     void showPianoForTest() { pianoBtn.setToggleState (true, juce::dontSendNotification); applyPianoVisibility(); }
     void holdKeyForTest (int note) { piano.setHeld (note, true); }
     // copied rows: up to three voices side by side
@@ -422,18 +430,19 @@ public:
         if (d == nullptr || d->mark || d->broken) return false;
         cf = 2;
         cancelTyping();
-        setNote (note);
+        if (panel.kbInstr >= 0) recordNote (cv, cr, note, panel.kbInstr, true);        // the keyboard has its own instrument
+        else setNote (note);
         if (advance) move (0, 1);
         return true;
     }
     // recording: the note goes to the given voice and row (the row that plays now); an empty instrument cell gets the instrument of the cursor
-    bool recordNote (int v, int r, int note, int instr)
+    bool recordNote (int v, int r, int note, int instr, bool force = false)
     {
         if (v < 0 || v > 2 || r < 0 || r >= (int) disp[(size_t) v].size()) return false;
         const auto& d = disp[(size_t) v][(size_t) r];
         if (d.mark || d.broken) return false;
         const int seq = panel.tune.trackList (v)[(size_t) d.entry].seq, ri = d.rowIn;
-        const bool setInstr = d.row.cmd == 0x80;
+        const bool setInstr = force || d.row.cmd == 0x80;
         panel.edit ([seq, ri, note, instr, setInstr] (NpTune& t)
         {
             auto rows = t.sequence (seq);
@@ -982,7 +991,9 @@ public:
             const int y = headH + (r - first) * rowH;
             g.setColour (ui::rowColour (th, r));
             g.fillRect (0, y, getWidth() - bar.getWidth(), rowH);
-            g.setColour (th.dim);
+            const bool kb = table == NpTune::tabInstrument && r == panel.kbInstr;
+            if (kb) { g.setColour (th.accent); g.fillRoundedRectangle ((float) 2, (float) y + 1.0f, (float) gutter - 6.0f, (float) rowH - 2.0f, 3.0f); }
+            g.setColour (kb ? juce::Colours::white : th.dim);
             g.drawText (hex2 (r * step()), 2, y, gutter - 8, rowH, juce::Justification::centredRight, false);
             for (int c = 0; c < cols; ++c)
             {
@@ -1004,6 +1015,18 @@ public:
         grabKeyboardFocus();
         dragging = false; dragMoved = false;
         if (e.y < headH) return;
+        if (table == NpTune::tabInstrument && e.x < gutter)     // the numbers: left = the keyboard plays this instrument, right = the pool
+        {
+            const int r = first + (e.y - headH) / rowH;
+            if (r >= 0 && r < panel.tune.tableRows (table))
+            {
+                row = r; col = 0; half = false;
+                if (e.mods.isPopupMenu()) panel.showInstrumentMenu (r, e.getScreenPosition());
+                else panel.toggleKbInstrument (r);
+                repaint(); if (onFocusChanged) onFocusChanged();
+            }
+            return;
+        }
         const int r = first + (e.y - headH) / rowH, c = (e.x - gutter) / colW();
         if (r < panel.tune.tableRows (table) && c >= 0 && c < panel.tune.tableCols (table))
         {
@@ -1486,7 +1509,8 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     {
         const auto ti = grid->info();
         const int c = grid->focusedColumn();
-        helpLabel.setText (ti.title + "\n" + (c < ti.help.size() ? ti.cols[c] + ": " + ti.help[c] : juce::String()), juce::dontSendNotification);
+        helpLabel.setText (ti.title + "\n" + (c < ti.help.size() ? ti.cols[c] + ": " + ti.help[c] : juce::String())
+                               + (grid->currentTable() == NpTune::tabInstrument ? "\n" + T ("Klick auf eine Nummer: die Klaviatur spielt dieses Instrument. Rechtsklick: Instrumentenpool") : juce::String()), juce::dontSendNotification);
     };
     // a new tune from the template
     NpTune t;
@@ -1546,7 +1570,7 @@ void TrackerPanel::pianoKey (int note, bool down)
     if (down && recording() && playing)             // recording: into the row that plays now, rounded to the nearest row
     {
         const int row = juce::jlimit (playStartRow, playEndRow, playStartRow + (int) std::lround ((double) main.player().getPlayFrame() / (double) playSpeed));
-        pattern->recordNote (pattern->cursorVoice(), row, note, pattern->instrumentAtCursor());
+        pattern->recordNote (pattern->cursorVoice(), row, note, kbInstr >= 0 ? kbInstr : pattern->instrumentAtCursor(), kbInstr >= 0);
         return;
     }
     if (down)
@@ -1561,6 +1585,111 @@ void TrackerPanel::pianoKey (int note, bool down)
     }
 }
 
+// ---- instrument pool
+void TrackerPanel::toggleKbInstrument (int row)
+{
+    kbInstr = kbInstr == row ? -1 : row;
+    status (kbInstr >= 0 ? T ("Die Klaviatur spielt Instrument %1 und schreibt es mit jeder Note", hex2 (kbInstr)) : T ("Die Klaviatur folgt wieder dem Instrument an der Cursor-Position"));
+    if (grid != nullptr) grid->repaint();
+}
+
+void TrackerPanel::loadPreset (int row, const InstrumentPreset& p)
+{
+    juce::String err;
+    NpTune probe = tune;
+    if (! InstrumentPool::apply (probe, row, p, err)) { status (err); return; }
+    edit ([row, p] (NpTune& t) { juce::String e; InstrumentPool::apply (t, row, p, e); });
+    status (T ("Preset „%1“ liegt jetzt in Instrument %2", p.name, hex2 (row)));
+}
+
+void TrackerPanel::saveInstrumentDialog (int row)
+{
+    auto* w = new juce::AlertWindow (T ("Instrument als Preset speichern"), T ("Instrument %1 mit seinen Arpeggio-, Puls- und Filterprogrammen im Pool ablegen", hex2 (row)), juce::MessageBoxIconType::NoIcon, this);
+    w->addTextEditor ("name", T ("Instrument %1", hex2 (row)), T ("Name"));
+    juce::StringArray cats;
+    for (int i = 0; i < InstrumentPool::kNumCategories; ++i) cats.add (juce::String::fromUTF8 (InstrumentPool::kCategories[i]));
+    w->addComboBox ("cat", cats, T ("Kategorie"));
+    w->getComboBoxComponent ("cat")->setSelectedItemIndex (InstrumentPool::kNumCategories - 1);
+    w->addButton (T ("Speichern"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (T ("Abbrechen"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<TrackerPanel> (this), row, w] (int r)
+    {
+        if (r != 1 || safe == nullptr) return;
+        auto name = w->getTextEditorContents ("name").trim();
+        if (name.isEmpty()) return;
+        const auto cat = juce::String::fromUTF8 (InstrumentPool::kCategories[juce::jlimit (0, InstrumentPool::kNumCategories - 1, w->getComboBoxComponent ("cat")->getSelectedItemIndex())]);
+        auto list = InstrumentPool::userPresets();
+        list.erase (std::remove_if (list.begin(), list.end(), [&] (const InstrumentPreset& p) { return p.name == name && p.category == cat; }), list.end());
+        list.push_back (InstrumentPool::capture (safe->tune, row, name, cat));
+        if (InstrumentPool::saveUserPresets (list)) safe->status (T ("Preset „%1“ gespeichert", name));
+        else safe->status (T ("Das Preset lässt sich nicht speichern"));
+    }), true);
+}
+
+void TrackerPanel::showInstrumentMenu (int row, juce::Point<int> screen)
+{
+    const bool ok = InstrumentPool::supported (tune);
+    auto all = std::make_shared<std::vector<InstrumentPreset>> (InstrumentPool::factoryPresets());
+    const int nFactory = (int) all->size();
+    const auto user = InstrumentPool::userPresets();
+    all->insert (all->end(), user.begin(), user.end());
+
+    juce::PopupMenu m;
+    m.addItem (1, kbInstr == row ? T ("Klaviatur wieder dem Cursor folgen lassen") : T ("Klaviatur auf Instrument %1 einstellen", hex2 (row)));
+    m.addSeparator();
+    juce::PopupMenu load;
+    for (int c = 0; c < InstrumentPool::kNumCategories - 1; ++c)
+    {
+        juce::PopupMenu sub;
+        for (int i = 0; i < nFactory; ++i)
+            if ((*all)[(size_t) i].category == juce::String::fromUTF8 (InstrumentPool::kCategories[c])) sub.addItem (1000 + i, (*all)[(size_t) i].name);
+        if (sub.getNumItems() > 0) load.addSubMenu (juce::String::fromUTF8 (InstrumentPool::kCategories[c]), sub);
+    }
+    if (! user.empty())
+    {
+        load.addSeparator();
+        juce::PopupMenu mine;
+        for (int i = nFactory; i < (int) all->size(); ++i) mine.addItem (1000 + i, (*all)[(size_t) i].category + ": " + (*all)[(size_t) i].name);
+        load.addSubMenu (T ("Eigene Presets"), mine);
+    }
+    m.addSubMenu (T ("Preset in Instrument %1 laden", hex2 (row)), load, ok);
+    m.addItem (2, T ("Instrument %1 als Preset speichern …", hex2 (row)), ok);
+    juce::PopupMenu del;
+    for (int i = nFactory; i < (int) all->size(); ++i) del.addItem (5000 + i, (*all)[(size_t) i].category + ": " + (*all)[(size_t) i].name);
+    m.addSubMenu (T ("Eigenes Preset löschen"), del, ! user.empty());
+    m.addSeparator();
+    m.addItem (3, T ("Instrument %1 leeren", hex2 (row)));
+    if (! ok) { m.addSeparator(); m.addItem (-1, T ("Der Instrumentenpool passt zu den Varianten 18 und 20"), false); }
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ screen.x, screen.y, 1, 1 }),
+                     [safe = juce::Component::SafePointer<TrackerPanel> (this), row, all, nFactory] (int r)
+    {
+        if (safe == nullptr || r <= 0) return;
+        if (r == 1) safe->toggleKbInstrument (row);
+        else if (r == 2) safe->saveInstrumentDialog (row);
+        else if (r == 3) safe->edit ([row] (NpTune& t) { InstrumentPool::clear (t, row); });
+        else if (r >= 5000)
+        {
+            const int i = r - 5000;
+            if (i < nFactory || i >= (int) all->size()) return;
+            const auto victim = (*all)[(size_t) i];
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, T ("Preset löschen"), T ("Das Preset „%1“ aus dem Pool löschen?", victim.name), T ("Löschen"), T ("Abbrechen"), safe.getComponent(),
+                juce::ModalCallbackFunction::create ([safe, victim] (int ok)
+                {
+                    if (ok == 0 || safe == nullptr) return;
+                    auto list = InstrumentPool::userPresets();
+                    list.erase (std::remove_if (list.begin(), list.end(), [&] (const InstrumentPreset& p) { return p.name == victim.name && p.category == victim.category; }), list.end());
+                    InstrumentPool::saveUserPresets (list);
+                    safe->status (T ("Preset „%1“ gelöscht", victim.name));
+                }));
+        }
+        else if (r >= 1000)
+        {
+            const int i = r - 1000;
+            if (i >= 0 && i < (int) all->size()) safe->loadPreset (row, (*all)[(size_t) i]);
+        }
+    });
+}
+
 void TrackerPanel::midiKey (int pitch, bool down)
 {
     // the pitch that sounds is the pitch of the key: the transposition of the track entry is taken out
@@ -1572,7 +1701,7 @@ void TrackerPanel::audition (int note)
 {
     NpTune t = tune;
     std::vector<NpRow> rows (24), blank (16);
-    rows[0].cmd = (juce::uint8) (0xa0 + pattern->instrumentAtCursor());
+    rows[0].cmd = (juce::uint8) (0xa0 + (kbInstr >= 0 ? kbInstr : pattern->instrumentAtCursor()));
     rows[0].note = (juce::uint8) juce::jlimit (1, 95, note + pattern->cursorTransposition());
     t.setSequence (1, rows);
     t.setSequence (2, blank);
@@ -2072,6 +2201,7 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
         if (c == '%') { content->toggleMute (0); continue; }
         if (c == '+') { content->pattern->transpose (1); continue; }
         if (c == '&') { content->showPianoForTest(); continue; }
+        if (c == '[') { content->kbInstrumentForTest (3); continue; }
         if (c == '!') { content->recordForTest(); continue; }
         if (c == '?') { content->holdKeyForTest (52); continue; }
         int code = c;

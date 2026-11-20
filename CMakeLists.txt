@@ -20,7 +20,8 @@ set(SM_CORE
     Source/Ppmd7.cpp
     Source/HvscUpdate.cpp
     Source/NpTune.cpp
-    Source/NpFromMidi.cpp)
+    Source/NpFromMidi.cpp
+    Source/InstrumentPool.cpp)
 
 set(SM_DEFS
     JUCE_WEB_BROWSER=0
