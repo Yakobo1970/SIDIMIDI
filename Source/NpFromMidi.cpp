@@ -17,6 +17,8 @@ constexpr double kFps = 50.1245;
 
 struct InNote { double start = 0, end = 0; int pitch = 60; int src = 0; };
 
+struct KitSet { std::array<std::shared_ptr<InstrumentPreset>, kNumDrumKinds> p; };     // the presets of a drum kit, by kind of drum
+
 struct InVoice
 {
     std::vector<InNote> notes;
@@ -25,6 +27,7 @@ struct InVoice
     double avgPitch = 60;
     juce::String label;
     bool drums = false;
+    std::shared_ptr<KitSet> kit;                // a drum kit of the pool: every drum gets the preset of its kind
     std::shared_ptr<InstrumentPreset> preset;   // a pool preset for the whole track (instead of role / program)
     int role = 0;              // 0 automatic, 1 lead, 2 bass, 3 pad, 4 drums
 };
@@ -140,6 +143,8 @@ struct Builder
         return id;
     }
 
+    int kitDrum (const KitSet& k, int kind) { return k.p[(size_t) kind] != nullptr ? preset (*k.p[(size_t) kind]) : drum (kind); }
+
     int drum (int kind)
     {
         const juce::String key = "d:" + juce::String (kind);
@@ -189,7 +194,13 @@ std::vector<NpRow> buildMelodic (const VoiceMix& v, double rowSec, int totalRows
         int nextSr = totalRows;
         if (i + 1 < slots.size()) nextSr = (int) std::lround (slots[i + 1].start / rowSec);
         if (nextSr <= sr || sr < 0 || sr >= totalRows) continue;                       // two slots on one row: the later one wins
-        if (slots[i].drum) { rows[(size_t) sr] = { (juce::uint8) (0xa0 + b.drum (drumKindOf (slots[i].pitches.front()))), 48 }; continue; }
+        if (slots[i].drum)
+        {
+            const auto& ds = v.srcs[(size_t) slots[i].src];
+            const int kind = drumKindOf (slots[i].pitches.front());
+            rows[(size_t) sr] = { (juce::uint8) (0xa0 + (ds.kit != nullptr ? b.kitDrum (*ds.kit, kind) : b.drum (kind))), 48 };
+            continue;
+        }
         const auto& source = v.srcs[(size_t) slots[i].src];
         const Timbre tb = pickTimbre (source);
         const int er = std::min (nextSr, std::max (sr + 1, (int) std::lround (slots[i].end / rowSec)));
@@ -227,7 +238,8 @@ std::vector<NpRow> buildDrums (const VoiceMix& v, double rowSec, int totalRows, 
         const int kind = drumKindOf (n.pitch);
         if (drumPriority (kind) < prio[(size_t) r]) continue;
         prio[(size_t) r] = drumPriority (kind);
-        rows[(size_t) r] = { (juce::uint8) (0xa0 + b.drum (kind)), 48 };
+        const auto& ds = v.srcs[(size_t) n.src];
+        rows[(size_t) r] = { (juce::uint8) (0xa0 + (ds.kit != nullptr ? b.kitDrum (*ds.kit, kind) : b.drum (kind))), 48 };
     }
     for (int r = 0; r < totalRows; ++r) if (prio[(size_t) r] > 0) ++hits;
     return rows;
@@ -337,7 +349,19 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
             iv.avgPitch = sum / (double) iv.notes.size();
             iv.role = juce::jlimit (0, 4, sc.role);
             iv.drums = iv.role == 4 || (iv.role == 0 && iv.channel == 10);
-            if (! sc.preset.empty())
+            if (! sc.kit.empty())
+            {
+                DrumKit dk;
+                if (InstrumentPool::findKit (sc.kit, dk))
+                {
+                    auto set = std::make_shared<KitSet>();
+                    for (size_t k = 0; k < (size_t) kNumDrumKinds; ++k)
+                        if (! dk.keys[k].empty()) { InstrumentPreset pr; if (InstrumentPool::find (dk.keys[k], pr)) set->p[k] = std::make_shared<InstrumentPreset> (pr); }
+                    iv.kit = set; iv.drums = true; iv.preset = nullptr;
+                    iv.label += " [Kit " + dk.name + "]";
+                }
+            }
+            else if (! sc.preset.empty())
             {
                 InstrumentPreset pr;
                 if (InstrumentPool::find (sc.preset, pr)) { iv.preset = std::make_shared<InstrumentPreset> (pr); iv.drums = false; iv.label += " [" + pr.name + "]"; }
@@ -373,7 +397,11 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
         for (size_t si = 0; si < vm.srcs.size(); ++si)
         {
             if (vm.srcs[si].preset != nullptr) b.preset (*vm.srcs[si].preset);
-            else if (vm.srcs[si].drums) { for (auto& n : vm.notes) if (n.src == (int) si) b.drum (drumKindOf (n.pitch)); }
+            else if (vm.srcs[si].drums)
+            {
+                for (auto& n : vm.notes)
+                    if (n.src == (int) si) { if (vm.srcs[si].kit != nullptr) b.kitDrum (*vm.srcs[si].kit, drumKindOf (n.pitch)); else b.drum (drumKindOf (n.pitch)); }
+            }
             else b.single (pickTimbre (vm.srcs[si]));
         }
     for (int v = 0; v < 3; ++v)

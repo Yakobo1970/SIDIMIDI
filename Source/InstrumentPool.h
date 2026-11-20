@@ -23,8 +23,23 @@ struct InstrumentPreset
     std::vector<Set> pulseSets, filterSets;
 };
 
+// a drum kit: for every kind of drum (as the import sorts the GM drum notes) a preset of the pool; an empty key keeps the built-in sound
+constexpr int kNumDrumKinds = 6;
+struct DrumKit
+{
+    juce::String name;
+    bool factory = false;
+    std::array<std::string, kNumDrumKinds> keys;       // kick, snare, tom, cymbal, hi-hat closed, hi-hat open
+};
+
 namespace InstrumentPool
 {
+const char* const kDrumKinds[] = { "Kick", "Snare", "Tom", "Becken", "Hi-Hat zu", "Hi-Hat offen" };
+std::string keyOf (const DrumKit& k);                                 // "f|name" or "u|name"
+bool findKit (const std::string& key, DrumKit& out);
+std::vector<DrumKit> factoryKits();
+std::vector<DrumKit> userKits();
+bool saveUserKits (const std::vector<DrumKit>& list);
 const char* const kCategories[] = { "Leads", "Bässe", "Arpeggios", "Pads", "Kicks", "Snares", "Hi-Hats", "Toms & Becken", "Effekte", "Eigene" };
 constexpr int kNumCategories = 10;
 

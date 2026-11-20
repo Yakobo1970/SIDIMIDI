@@ -584,6 +584,20 @@ ROWS = [
 # ---- SID preview in the track choice
 ('Klang: SID', 'Sound: SID', 'Son : SID'),
 ('Vorhören mit dem Klang der Konvertierung: Rollen und Presets werden mit der SID-Emulation gespielt. Aus: der GM-Synth des Computers spielt die Spuren', 'Listen with the sound of the conversion: roles and presets are played by the SID emulation. Off: the computer’s GM synth plays the tracks', 'Écoute avec le son de la conversion : rôles et presets sont joués par l’émulation SID. Désactivé : le synthé GM de l’ordinateur joue les pistes'),
+# ---- drum kits
+('Drum-Kit aus Presets', 'Drum kit from presets', 'Kit de batterie à partir de presets'),
+('Kit zusammenstellen …', 'Put together a kit …', 'Composer un kit …'),
+('Drum-Kit zusammenstellen', 'Put together a drum kit', 'Composer un kit de batterie'),
+('Für jede Trommel ein Preset wählen. „Standard“ nimmt den eingebauten Klang', 'Choose a preset for every drum. “Default” keeps the built-in sound', 'Choisissez un preset pour chaque élément. « Standard » garde le son intégré'),
+('Mein Kit', 'My kit', 'Mon kit'),
+('Standard', 'Default', 'Standard'),
+('Kick', 'Kick', 'Grosse caisse'),
+('Snare', 'Snare', 'Caisse claire'),
+('Tom', 'Tom', 'Tom'),
+('Becken', 'Cymbal', 'Cymbale'),
+('Hi-Hat zu', 'Hi-hat closed', 'Charleston fermé'),
+('Hi-Hat offen', 'Hi-hat open', 'Charleston ouvert'),
+('Drum-Kit „%1“ gespeichert', 'Drum kit “%1” saved', 'Kit de batterie « %1 » enregistré'),
 ]
 
 def esc(s):

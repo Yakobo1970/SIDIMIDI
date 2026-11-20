@@ -369,6 +369,8 @@ int main (int argc, char** argv)
         }
         if (const char* pn = std::getenv ("SIDI_PRESET"))        // SIDI_PRESET="Säge" gives the first track of OSC1 a factory preset
             for (auto& fp : InstrumentPool::factoryPresets()) if (fp.name == juce::String::fromUTF8 (pn) && ! vs[0].empty()) vs[0][0].preset = InstrumentPool::keyOf (fp);
+        if (const char* kn = std::getenv ("SIDI_KIT"))           // SIDI_KIT="808" gives the first track of OSC1 a factory drum kit
+            for (auto& fk : InstrumentPool::factoryKits()) if (fk.name == juce::String::fromUTF8 (kn) && ! vs[0].empty()) vs[0][0].kit = InstrumentPool::keyOf (fk);
         auto r = npImportMidi (juce::File (juce::String::fromUTF8 (argv[3])), tpl.getData(), tpl.getSize(), vs);
         out (r.report);
         if (! r.ok) return 1;

@@ -282,6 +282,76 @@ bool find (const std::string& key, InstrumentPreset& out)
     return false;
 }
 
+std::string keyOf (const DrumKit& k) { return std::string (k.factory ? "f|" : "u|") + k.name.toStdString(); }
+
+std::vector<DrumKit> factoryKits()
+{
+    const auto presets = factoryPresets();
+    auto key = [&] (const char* name)
+    {
+        for (auto& p : presets) if (p.name == juce::String::fromUTF8 (name)) return keyOf (p);
+        return std::string();
+    };
+    auto kit = [&] (const char* name, const char* k, const char* s, const char* t, const char* c, const char* h, const char* o)
+    {
+        DrumKit d;
+        d.name = juce::String::fromUTF8 (name); d.factory = true;
+        d.keys = { key (k), key (s), key (t), key (c), key (h), key (o) };
+        return d;
+    };
+    return {
+        kit ("Punchy", "Kick", "Snare knackig", "Tom mittel", "Becken", "Hi-Hat kurz", "Hi-Hat halb offen"),
+        kit ("808", "Kick 808", "Snare lang", "Tom tief", "Crash lang", "Hi-Hat zu", "Hi-Hat offen"),
+        kit ("Hart", "Kick kurz", "Snare knackig", "Tom hoch", "Becken", "Hi-Hat kurz", "Hi-Hat zu"),
+        kit ("Lang und weich", "Kick lang", "Snare lang", "Tom tief", "Crash lang", "Hi-Hat halb offen", "Hi-Hat offen"),
+        kit ("Elektro", "Kick", "Klatsche", "Tom hoch", "Becken", "Hi-Hat zu", "Hi-Hat offen"),
+    };
+}
+
+static juce::File kitFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("SIDIMIDI").getChildFile ("drum-kits.json");
+}
+
+std::vector<DrumKit> userKits()
+{
+    std::vector<DrumKit> out;
+    const auto v = juce::JSON::parse (kitFile());
+    if (auto* a = v.getArray())
+        for (auto& e : *a)
+        {
+            DrumKit k;
+            k.name = e["name"].toString();
+            if (auto* ks = e["keys"].getArray()) for (int i = 0; i < kNumDrumKinds && i < ks->size(); ++i) k.keys[(size_t) i] = (*ks)[i].toString().toStdString();
+            if (k.name.isNotEmpty()) out.push_back (k);
+        }
+    return out;
+}
+
+bool saveUserKits (const std::vector<DrumKit>& list)
+{
+    juce::Array<juce::var> a;
+    for (auto& k : list)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("name", k.name);
+        juce::Array<juce::var> ks;
+        for (auto& key : k.keys) ks.add (juce::String (key));
+        o->setProperty ("keys", ks);
+        a.add (juce::var (o));
+    }
+    const auto f = kitFile();
+    f.getParentDirectory().createDirectory();
+    return f.replaceWithText (juce::JSON::toString (juce::var (a)), false, false, "\n");
+}
+
+bool findKit (const std::string& key, DrumKit& out)
+{
+    const bool factory = key.size() > 1 && key[0] == 'f';
+    for (auto& k : factory ? factoryKits() : userKits()) if (keyOf (k) == key) { out = k; return true; }
+    return false;
+}
+
 bool supported (const NpTune& t) { const int v = t.playerVersion(); return v == 18 || v == 20; }
 
 std::vector<InstrumentPreset> factoryPresets()

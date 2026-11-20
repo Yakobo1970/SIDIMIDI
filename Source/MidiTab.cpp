@@ -176,8 +176,12 @@ public:
         roleOf.assign (tracks.size(), 0);
         prioOf.assign (tracks.size(), 0);
         presetOf.assign (tracks.size(), -1);
+        kitOf.assign (tracks.size(), -1);
         if (toTracker)
         {
+            kits = InstrumentPool::factoryKits();
+            const auto myKits = InstrumentPool::userKits();
+            kits.insert (kits.end(), myKits.begin(), myKits.end());
             presets = InstrumentPool::factoryPresets();
             const auto mine = InstrumentPool::userPresets();
             presets.insert (presets.end(), mine.begin(), mine.end());
@@ -344,14 +348,14 @@ public:
     {
         if (row < 0 || row >= (int) tracks.size()) { delete existing; return nullptr; }
         auto* c = dynamic_cast<Row*> (existing);
-        if (c == nullptr) { delete existing; c = new Row (*this); }
+        if (c == nullptr || c->version != menuVersion) { delete existing; c = new Row (*this); }
         c->set (row);
         return c;
     }
 
     struct Row : public juce::Component
     {
-        explicit Row (TrackPickPanel& p) : panel (p)
+        explicit Row (TrackPickPanel& p) : panel (p), version (p.menuVersion)
         {
             addAndMakeVisible (play); addAndMakeVisible (voice); addAndMakeVisible (role); addAndMakeVisible (prio);
             prio.setTextWhenNothingSelected (T ("Priorität"));
@@ -387,19 +391,26 @@ public:
                     if (sub.getNumItems() > 0) all.addSubMenu (juce::String::fromUTF8 (InstrumentPool::kCategories[c]), sub);
                 }
                 root->addSubMenu (T ("Preset aus dem Instrumentenpool"), all);
+                juce::PopupMenu kitMenu;
+                for (size_t i = 0; i < panel.kits.size(); ++i) kitMenu.addItem (300 + (int) i, "Kit: " + panel.kits[i].name);
+                kitMenu.addSeparator();
+                kitMenu.addItem (299, T ("Kit zusammenstellen …"));
+                root->addSubMenu (T ("Drum-Kit aus Presets"), kitMenu);
             }
             role.onChange = [this]
             {
                 const int id = role.getSelectedId();
-                if (id >= 100) { panel.presetOf[(size_t) row] = id - 100; panel.roleOf[(size_t) row] = 0; }
-                else if (id > 0) { panel.presetOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = id - 1; }
+                if (id == 299) { const int keep = row; juce::MessageManager::callAsync ([p = &panel, keep] { p->composeKit ((size_t) keep); }); set (row); return; }
+                if (id >= 300) { panel.kitOf[(size_t) row] = id - 300; panel.presetOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = 4; }
+                else if (id >= 100) { panel.presetOf[(size_t) row] = id - 100; panel.kitOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = 0; }
+                else if (id > 0) { panel.presetOf[(size_t) row] = -1; panel.kitOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = id - 1; }
             };
         }
         void set (int r)
         {
             row = r;
             voice.setSelectedId (panel.voiceOf[(size_t) r] + 1, juce::dontSendNotification);
-            role.setSelectedId (panel.presetOf[(size_t) r] >= 0 ? 100 + panel.presetOf[(size_t) r] : panel.roleOf[(size_t) r] + 1, juce::dontSendNotification);
+            role.setSelectedId (panel.kitOf[(size_t) r] >= 0 ? 300 + panel.kitOf[(size_t) r] : panel.presetOf[(size_t) r] >= 0 ? 100 + panel.presetOf[(size_t) r] : panel.roleOf[(size_t) r] + 1, juce::dontSendNotification);
             const bool sh = panel.shared ((size_t) r);
             prio.clear (juce::dontSendNotification);
             const int n = panel.groupSize (panel.voiceOf[(size_t) r]);
@@ -439,10 +450,57 @@ public:
             voice.setBounds (r.removeFromRight (110));
         }
         TrackPickPanel& panel;
+        int version = 0;
         int row = 0;
         juce::TextButton play;
         juce::ComboBox voice, role, prio;
     };
+
+    // a drum kit of your own: one preset for every kind of drum
+    void composeKit (size_t row)
+    {
+        auto* w = new juce::AlertWindow (T ("Drum-Kit zusammenstellen"), T ("Für jede Trommel ein Preset wählen. „Standard“ nimmt den eingebauten Klang"), juce::MessageBoxIconType::NoIcon, this);
+        w->addTextEditor ("name", T ("Mein Kit"), T ("Name"));
+        static const char* const wanted[kNumDrumKinds] = { "Kicks", "Snares", "Toms & Becken", "Toms & Becken", "Hi-Hats", "Hi-Hats" };
+        auto keys = std::make_shared<std::array<std::vector<std::string>, kNumDrumKinds>>();
+        for (int k = 0; k < kNumDrumKinds; ++k)
+        {
+            juce::StringArray items;
+            items.add (T ("Standard"));
+            (*keys)[(size_t) k].push_back ({});
+            for (auto& p : presets)
+                if (p.category == juce::String::fromUTF8 (wanted[k]) || ! p.factory) { items.add (p.name); (*keys)[(size_t) k].push_back (InstrumentPool::keyOf (p)); }
+            w->addComboBox ("k" + juce::String (k), items, T (InstrumentPool::kDrumKinds[k]));
+            w->getComboBoxComponent ("k" + juce::String (k))->setSelectedItemIndex (std::min (1, items.size() - 1));
+        }
+        w->addButton (T ("Speichern"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton (T ("Abbrechen"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<TrackPickPanel> (this), row, w, keys] (int r)
+        {
+            if (r != 1 || safe == nullptr) return;
+            const auto name = w->getTextEditorContents ("name").trim();
+            if (name.isEmpty()) return;
+            DrumKit kit;
+            kit.name = name;
+            for (int k = 0; k < kNumDrumKinds; ++k)
+            {
+                const int idx = w->getComboBoxComponent ("k" + juce::String (k))->getSelectedItemIndex();
+                kit.keys[(size_t) k] = idx >= 0 && idx < (int) (*keys)[(size_t) k].size() ? (*keys)[(size_t) k][(size_t) idx] : std::string();
+            }
+            auto mine = InstrumentPool::userKits();
+            mine.erase (std::remove_if (mine.begin(), mine.end(), [&] (const DrumKit& d) { return d.name == name; }), mine.end());
+            mine.push_back (kit);
+            InstrumentPool::saveUserKits (mine);
+            safe->kits = InstrumentPool::factoryKits();
+            safe->kits.insert (safe->kits.end(), mine.begin(), mine.end());
+            safe->kitOf[row] = (int) safe->kits.size() - 1;
+            safe->presetOf[row] = -1;
+            safe->roleOf[row] = 4;
+            ++safe->menuVersion;
+            safe->list.updateContent();
+            safe->main.setStatus (T ("Drum-Kit „%1“ gespeichert", name));
+        }), true);
+    }
 
     // ---- preview: tracks are switched on and off one by one; they sound together
     bool anyActive() const { for (auto a : active) if (a != 0) return true; return false; }
@@ -461,6 +519,7 @@ public:
                 const bool assigned = voiceOf[i] > 0;
                 const size_t v = assigned ? (size_t) voiceOf[i] - 1 : (size_t) (rank++ % 3);
                 src[v].push_back ({ tracks[i].partId(), roleOf[i], assigned && shared (i) ? prioOf[i] : 100 + (int) i,
+                                    kitOf[i] >= 0 ? InstrumentPool::keyOf (kits[(size_t) kitOf[i]]) : std::string(),
                                     presetOf[i] >= 0 ? InstrumentPool::keyOf (presets[(size_t) presetOf[i]]) : std::string() });
                 any = true;
             }
@@ -586,6 +645,7 @@ public:
         for (size_t i = 0; i < tracks.size(); ++i)
             if (voiceOf[i] > 0)
                 sources[(size_t) voiceOf[i] - 1].push_back ({ tracks[i].partId(), roleOf[i], shared (i) ? prioOf[i] : 0,
+                                                              kitOf[i] >= 0 ? InstrumentPool::keyOf (kits[(size_t) kitOf[i]]) : std::string(),
                                                               presetOf[i] >= 0 ? InstrumentPool::keyOf (presets[(size_t) presetOf[i]]) : std::string() });
         stopAll();
         if (toTracker) tab.convertToTracker (itemIndex, sources);
@@ -649,8 +709,10 @@ private:
     std::vector<Track> tracks;
     bool toTracker = false;
     std::vector<int> voiceOf, roleOf, prioOf;      // prioOf: 0 = highest
-    std::vector<int> presetOf;                      // index into presets, -1 = none (the role decides)
+    std::vector<int> presetOf, kitOf;               // index into presets / kits, -1 = none (the role decides)
     std::vector<InstrumentPreset> presets;
+    std::vector<DrumKit> kits;
+    int menuVersion = 0;                            // grows when a kit is added: the role boxes are built again
     std::vector<char> active;
     std::vector<juce::Image> minis;
     double total = 1.0;
