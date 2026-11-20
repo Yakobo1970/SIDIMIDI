@@ -2,7 +2,7 @@
 ; Aufruf:  "C:\Program Files\Inno Setup 7\ISCC.exe" Installer\inno-Sidi-setup.iss   (zuvor: cmake --build build --config Release --target SIDIMIDI)
 
 #define MyAppName "SIDiMIDI"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "Un(d)AbtanzBAR"
 #define MyAppURL "https://www.undabtanzbar.de/software/sidimidi/"
 #define MyAppExeName "SIDiMIDI.exe"

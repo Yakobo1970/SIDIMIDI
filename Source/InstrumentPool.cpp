@@ -40,11 +40,11 @@ InstrumentPreset make (const char* name, const char* cat, int ad, int sr, const 
 
 InstrumentPreset single (const char* n, const char* c, int ad, int sr, int wave) { return make (n, c, ad, sr, { { 0, wave } }, 0); }
 
-InstrumentPreset chord (const char* n, int ad, int sr, int wave, std::initializer_list<int> intervals)
+InstrumentPreset chord (const char* n, int ad, int sr, int wave, std::initializer_list<int> intervals, int hf = 0x80)
 {
     std::vector<std::pair<int, int>> steps;
     for (int i : intervals) steps.push_back ({ i, wave });
-    return make (n, "Arpeggios", ad, sr, steps, 0);
+    return make (n, "Arpeggios", ad, sr, steps, 0, hf);
 }
 
 // drums: fixed notes ($80 + hertz table index) for a few frames, then silence (the program stays on its last step)
@@ -305,6 +305,11 @@ std::vector<DrumKit> factoryKits()
         kit ("Hart", "Kick kurz", "Snare knackig", "Tom hoch", "Becken", "Hi-Hat kurz", "Hi-Hat zu"),
         kit ("Lang und weich", "Kick lang", "Snare lang", "Tom tief", "Crash lang", "Hi-Hat halb offen", "Hi-Hat offen"),
         kit ("Elektro", "Kick", "Klatsche", "Tom hoch", "Becken", "Hi-Hat zu", "Hi-Hat offen"),
+        kit ("909", "Kick 909", "Clap", "Tom mittel", "Becken", "Hi-Hat zu", "Hi-Hat offen"),
+        kit ("Industrial", "Kick hart", "Snare lang", "Tom tief", "Crash lang", "Hi-Hat winzig", "Hi-Hat halb offen"),
+        kit ("Lo-Fi", "Kick kurz", "Klatsche", "Tom hoch", "Becken", "Shaker", "Hi-Hat zu"),
+        kit ("Minimal", "Kick Click", "Rimshot", "Tom hoch", "Becken", "Hi-Hat winzig", "Hi-Hat kurz"),
+        kit ("Disco", "Kick", "Snare lang", "Tom mittel", "Crash lang", "Hi-Hat zu", "Hi-Hat offen"),
     };
 }
 
@@ -410,6 +415,65 @@ std::vector<InstrumentPreset> factoryPresets()
     l.push_back (drum ("Zap abwärts", "Effekte", 0x00, 0xa8, { 60, 54, 48, 42, 36, 30, 24 }, wSaw));
     { auto p = drum ("Laser", "Effekte", 0x00, 0xa8, { 20, 26, 32, 38, 44, 50, 56, 62 }, wPulse); swing (p, 0x08, 0x40, 0x08); l.push_back (p); }
     l.push_back (make ("Sirene", "Effekte", 0x08, 0xf8, { { 0, wSaw }, { 0, wSaw }, { 7, wSaw }, { 7, wSaw } }, 0));
+    // ---- more synths and leads
+    l.push_back (single ("Säge-Orgel", "Leads", 0x00, 0xf8, wSaw));
+    l.push_back (single ("Säge-Pluck", "Leads", 0x02, 0x00, wSaw));
+    { auto p = single ("Puls-Pluck", "Leads", 0x03, 0x00, wPulse); swing (p, 0x08, 0x30, 0x04); l.push_back (p); }
+    { auto p = single ("Puls schmal", "Leads", 0x08, 0xa8, wPulse); swing (p, 0x02, 0x20, 0x10); l.push_back (p); }
+    { auto p = single ("Puls breit", "Leads", 0x08, 0xa8, wPulse); swing (p, 0x0a, 0x10, 0x20); l.push_back (p); }
+    { auto p = single ("Puls-PWM langsam", "Leads", 0x09, 0xa9, wPulse); swing (p, 0x08, 0x10, 0x30); l.push_back (p); }
+    l.push_back (single ("Dreieck-Flöte", "Leads", 0x38, 0xa8, wTri));
+    { auto p = make ("Quinten-Lead", "Leads", 0x08, 0xa8, { { 0, wPulse }, { 7, wPulse } }, 0); swing (p, 0x0c, 0x40, 0x08); l.push_back (p); }
+    { auto p = make ("Terz-Lead", "Leads", 0x08, 0xa8, { { 0, wPulse }, { 4, wPulse } }, 0); swing (p, 0x0c, 0x40, 0x08); l.push_back (p); }
+    l.push_back (make ("Gate-Lead schnell", "Leads", 0x08, 0xa8, { { 0, wSaw }, { 0, wSaw }, { 0, 0 }, { 0, 0 } }, 0));
+    l.push_back (make ("Gate-Lead langsam", "Leads", 0x08, 0xa8, { { 0, wSaw }, { 0, wSaw }, { 0, 0 }, { 0, 0 } }, 0, 0x81));
+    l.push_back (make ("Zirp-Lead", "Leads", 0x08, 0xa8, { { 0, wSaw }, { 12, wSaw }, { 7, wSaw }, { 12, wSaw } }, 0));
+    // ---- more basses
+    { auto p = single ("Puls-Bass hart", "Bässe", 0x04, 0xa4, wPulse); swing (p, 0x06, 0x40, 0x06); l.push_back (p); }
+    { auto p = single ("Puls-Bass breit", "Bässe", 0x05, 0xa5, wPulse); swing (p, 0x0a, 0x20, 0x10); l.push_back (p); }
+    { auto p = single ("Puls-Bass Wobble", "Bässe", 0x05, 0xa5, wPulse); swing (p, 0x08, 0x90, 0x04); l.push_back (p); }
+    l.push_back (single ("Säge-Bass Pluck", "Bässe", 0x02, 0x00, wSaw));
+    l.push_back (single ("Sub-Bass kurz", "Bässe", 0x03, 0x00, wTri));
+    { auto p = make ("Oktav-Bass", "Bässe", 0x05, 0xa5, { { 0, wPulse }, { 12, wPulse } }, 0); swing (p, 0x0c, 0x40, 0x08); l.push_back (p); }
+    l.push_back (make ("Rollender Bass", "Bässe", 0x04, 0xa4, { { 0, wSaw }, { 0, wSaw }, { 12, wSaw }, { 0, wSaw } }, 0));
+    l.push_back (make ("Gate-Bass", "Bässe", 0x05, 0xa5, { { 0, wSaw }, { 0, wSaw }, { 0, 0 }, { 0, 0 } }, 0));
+    l.push_back (make ("Klick-Bass (Dreieck)", "Bässe", 0x05, 0xa6, { { 0, wNoise }, { 0, wTri } }, 1));
+    // ---- more arpeggios
+    l.push_back (chord ("Dur 9", 0x08, 0xa8, wSaw, { 0, 4, 7, 14 }));
+    l.push_back (chord ("Moll 9", 0x08, 0xa8, wSaw, { 0, 3, 7, 14 }));
+    l.push_back (chord ("Dur 6", 0x08, 0xa8, wSaw, { 0, 4, 7, 9 }));
+    l.push_back (chord ("Moll 6", 0x08, 0xa8, wSaw, { 0, 3, 7, 9 }));
+    l.push_back (chord ("Dominant 7", 0x08, 0xa8, wSaw, { 0, 4, 7, 10 }));
+    l.push_back (chord ("Sus 4 mit 7", 0x08, 0xa8, wSaw, { 0, 5, 7, 10 }));
+    l.push_back (chord ("Sus 2", 0x08, 0xa8, wSaw, { 0, 2, 7 }));
+    l.push_back (chord ("Vermindert", 0x08, 0xa8, wSaw, { 0, 3, 6 }));
+    l.push_back (chord ("Übermäßig", 0x08, 0xa8, wSaw, { 0, 4, 8 }));
+    l.push_back (chord ("Power (Quinte)", 0x08, 0xa8, wSaw, { 0, 7 }));
+    l.push_back (chord ("Quinte und Oktave 2", 0x08, 0xa8, wSaw, { 0, 7, 12, 19 }));
+    l.push_back (chord ("Dur weit", 0x08, 0xa8, wSaw, { 0, 4, 7, 12, 16, 19 }));
+    l.push_back (chord ("Moll weit", 0x08, 0xa8, wSaw, { 0, 3, 7, 12, 15, 19 }));
+    l.push_back (chord ("Dur langsam", 0x08, 0xa8, wSaw, { 0, 4, 7 }, 0x82));
+    l.push_back (chord ("Moll langsam", 0x08, 0xa8, wSaw, { 0, 3, 7 }, 0x82));
+    l.push_back (chord ("Oktave langsam", 0x08, 0xa8, wSaw, { 0, 12 }, 0x81));
+    l.push_back (chord ("Dur (Dreieck)", 0x08, 0xa6, wTri, { 0, 4, 7 }));
+    l.push_back (chord ("Moll (Dreieck)", 0x08, 0xa6, wTri, { 0, 3, 7 }));
+    { auto p = chord ("Moll auf und ab (Puls)", 0x09, 0xa9, wPulse, { 0, 3, 7, 12, 7, 3 }); swing (p, 0x0c, 0x40, 0x08); l.push_back (p); }
+    { auto p = chord ("Dur Pluck (Puls)", 0x03, 0x00, wPulse, { 0, 4, 7 }); swing (p, 0x08, 0x30, 0x04); l.push_back (p); }
+    // ---- more pads
+    l.push_back (single ("Säge-Pad langsam", "Pads", 0xaa, 0xfa, wSaw));
+    { auto p = single ("Puls-Pad breit", "Pads", 0x9a, 0xf9, wPulse); swing (p, 0x0a, 0x10, 0x30); l.push_back (p); }
+    l.push_back (single ("Dreieck-Pad weich", "Pads", 0x98, 0xf8, wTri));
+    { auto p = make ("Chor", "Pads", 0x9a, 0xf8, { { 0, wPulse }, { 0, wPulse }, { 12, wPulse } }, 0, 0x82); swing (p, 0x08, 0x10, 0x30); l.push_back (p); }
+    l.push_back (single ("Dunkles Pad", "Pads", 0xa8, 0xf6, wSaw));
+    l.push_back (make ("Glas", "Pads", 0x88, 0xf8, { { 0, wTri }, { 12, wTri } }, 0, 0x81));
+    // ---- more drums
+    l.push_back (drum ("Kick hart", "Kicks", 0x00, 0xf0, { 48, 36, 24, 16, 12 }, wTri));
+    l.push_back (drum ("Kick 909", "Kicks", 0x00, 0xf0, { 44, 38, 32, 28, 24, 20, 16 }, wTri));
+    l.push_back (make ("Kick Click", "Kicks", 0x00, 0xf0, { { 0x80 + 60, wNoise }, { 0x80 + 36, wTri }, { 0x80 + 28, wTri }, { 0x80 + 20, wTri }, { 0x80 + 14, wTri }, { 0, 0 } }, 5));
+    l.push_back (make ("Rimshot", "Snares", 0x00, 0xf0, { { 0x80 + 52, wTri }, { 0x80 + 72, wNoise }, { 0, 0 } }, 2));
+    l.push_back (make ("Clap", "Snares", 0x00, 0xf0, { { 0x80 + 62, wNoise }, { 0, 0 }, { 0x80 + 62, wNoise }, { 0, 0 }, { 0x80 + 60, wNoise }, { 0x80 + 58, wNoise }, { 0x80 + 56, wNoise }, { 0, 0 } }, 7));
+    l.push_back (noiseHit ("Hi-Hat winzig", "Hi-Hats", 94, 1));
+    l.push_back (noiseHit ("Shaker", "Hi-Hats", 86, 3));
     for (auto& p : l) p.factory = true;
     return l;
 }

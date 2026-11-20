@@ -5,6 +5,7 @@
 #include "EmbeddedMiniplayer.h"
 #include <vector>
 #include <map>
+#include <set>
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -331,8 +332,23 @@ private:
         const auto name = rawName.toLowerCase();
         for (auto* bad : { "bass", "lead", "synth", "pad", "piano", "string", "guitar", "gitarre", "organ", "brass", "arp" })
             if (name.contains(bad) && !name.contains("drum")) return false;
-        for (auto* hint : { "drum", "perc", "kick", "snare", "hihat", "hi-hat", "hi hat", "cymbal", "schlagzeug", "batterie", "beat", "tom" })
+        for (auto* hint : { "drum", "drm", "perc", "kick", "snare", "hihat", "hi-hat", "hi hat", "hat", "cymbal", "crash", "ride", "clap", "conga", "bongo", "tamb", "shaker",
+                            "schlagzeug", "batterie", "beat", "tom", "808", "909", "kit" })
             if (name.contains(hint)) return true;
+        const auto trimmed = name.trim();
+        for (auto* shortName : { "dr", "drs", "hh", "bd", "sd", "cp", "oh", "ch" })
+            if (trimmed == shortName) return true;
+        // a track of one or two kinds of drum (only a hi-hat, only a snare ...): all notes are GM drum notes and short; a bass
+        // pedal on the kick note does not count, there has to be a note that a bass does not play
+        if (noteCount >= 8 && pitches.size() <= 3 && !durations.empty())
+        {
+            static const std::set<int> drumSet { 35, 36, 37, 38, 39, 40, 42, 44, 46, 49, 51, 54, 56, 69, 70 };
+            static const std::set<int> notBass { 38, 39, 40, 42, 44, 46, 49, 51, 54, 56, 69, 70 };
+            bool all = true, other = false;
+            for (auto& p : pitches) { if (!drumSet.count(p.first)) all = false; if (notBass.count(p.first)) other = true; }
+            std::sort(durations.begin(), durations.end());
+            if (all && other && durations[durations.size() / 2] <= 0.2) return true;
+        }
         if (noteCount < 8 || pitches.size() < 3 || pitches.size() > 16) return false;
         int inRange = 0;
         for (auto& p : pitches) if (p.first >= 35 && p.first <= 81) inRange += p.second;

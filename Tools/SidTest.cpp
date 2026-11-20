@@ -317,7 +317,8 @@ int main (int argc, char** argv)
         for (auto& p : fac)
         {
             juce::String e;
-            if (! InstrumentPool::apply (t, slot, p, e)) { out ("FAILED " + p.name + ": " + e); ++bad; continue; }
+            { NpTune fresh; juce::String er; fresh.loadPrg (tpl.getData(), tpl.getSize(), er); fresh.makeStarter(); if (! InstrumentPool::apply (fresh, 9, p, e)) { out ("FAILED in a fresh tune " + p.name + ": " + e); ++bad; continue; } }
+            if (! InstrumentPool::apply (t, slot, p, e)) continue;       // all of them together do not fit one tune (256 arpeggio rows); that is fine
             const auto back = InstrumentPool::capture (t, slot, p.name, p.category);
             const bool sameProg = back.arpOn.rows.size() == p.arpOn.rows.size() && back.pulseSets.size() == p.pulseSets.size();
             if (! sameProg) { out ("ROUND TRIP differs: " + p.name); ++bad; }

@@ -71,8 +71,9 @@ int drumKindOf (int pitch)
     if (pitch >= 37 && pitch <= 40) return dSnare;
     if (pitch == 41 || pitch == 43 || pitch == 45 || pitch == 47 || pitch == 48 || pitch == 50) return dTom;
     if (pitch == 46) return dOpenHat;
-    if (pitch == 49 || pitch == 51 || pitch == 52 || pitch == 53 || pitch == 55 || pitch == 57 || pitch == 59) return dCymbal;
-    return dHat;
+    if (pitch == 49 || pitch == 51 || pitch == 52 || pitch == 53 || pitch == 55 || pitch == 57 || pitch == 58 || pitch == 59) return dCymbal;
+    if ((pitch >= 60 && pitch <= 66) || pitch == 56) return dTom;          // bongos, congas, timbales, cowbell
+    return dHat;                                                            // closed hi-hat, tambourine, shaker, claves, triangle ... and anything unusual
 }
 int drumPriority (int kind) { static const int pr[] = { 5, 4, 3, 2, 1, 1 }; return pr[kind]; }
 
