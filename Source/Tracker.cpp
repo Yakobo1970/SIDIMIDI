@@ -9,6 +9,7 @@
 #include "NpFromMidi.h"
 #include "SidView.h"
 #include <BinaryData.h>
+#include <map>
 
 namespace sm
 {
@@ -174,8 +175,15 @@ public:
     void redo();
     void status (const juce::String& s);
     void tuneChanged();
-    void play (bool fromCursor);
+    void play();                                    // the whole tune, or only the marked area
     void stop();
+    void toggleMute (int voice);
+    void copySel();
+    void pasteSel();
+    void cutSel();
+    void applyPlayRange();
+    // copied rows: up to three voices side by side
+    struct Clip { int voices = 0, rows = 0; std::array<std::vector<NpRow>, 3> data; } clip;
     bool isPlaying() const { return playing; }
     void confirmDiscard (std::function<void()> proceed);
     void newTune();
@@ -202,8 +210,11 @@ public:
     GridView* grid = nullptr;
 
 private:
-    juce::TextButton tabButtons[5], voiceMute[3], newBtn, openBtn, d64Btn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, cursorBtn, stopBtn,
+    juce::TextButton tabButtons[5], newBtn, openBtn, d64Btn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, stopBtn, copyBtn, pasteBtn,
                      octMinus, octPlus, spdMinus, spdPlus;
+    RepeatButton repeatBtn;                             // repeat the tune or the marked area
+    juce::uint32 playEndFrames = 0;
+    int playEndRow = 0;
     juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel, titleLbl, authorLbl;
     juce::TextEditor titleEd, authorEd;                 // title and author for the info area of the .sid (changeable defaults)
     bool titleEdited = false;
@@ -267,6 +278,123 @@ public:
         repaint();
     }
 
+    // ---- selection (Shift + mouse or Shift + arrow keys); it is also the area that plays
+    bool hasSelection() const { return selActive; }
+    void selection (int& v0, int& v1, int& r0, int& r1) const { v0 = sv0; v1 = sv1; r0 = sr0; r1 = sr1; }
+    int longestRows() const { int n = 0; for (auto& d : disp) n = std::max (n, (int) d.size() - 1); return n; }
+    void clearSelection() { if (selActive) { selActive = false; repaint(); } }
+    void setSelection (int av, int ar, int bv, int br)
+    {
+        const int last = std::max (0, longestRows() - 1);
+        sv0 = juce::jlimit (0, 2, std::min (av, bv)); sv1 = juce::jlimit (0, 2, std::max (av, bv));
+        sr0 = juce::jlimit (0, last, std::min (ar, br)); sr1 = juce::jlimit (0, last, std::max (ar, br));
+        selActive = true;
+        panel.status (T ("%1 Zeilen × %2 Stimmen markiert – Strg + C kopiert, F1 spielt nur diesen Bereich", sr1 - sr0 + 1, sv1 - sv0 + 1));
+        repaint();
+    }
+    // a copy of the tune that holds only the marked rows (other voices silent), looping on its own - for playing the area
+    bool buildRegionTune (NpTune& t, int v0, int v1, int r0, int r1, juce::String& why) const
+    {
+        struct Seg { juce::uint8 trans; std::vector<NpRow> rows; };
+        std::array<std::vector<Seg>, 3> segs;
+        for (int v = 0; v < 3; ++v)
+        {
+            const bool in = v >= v0 && v <= v1;
+            const auto list = panel.tune.trackList (v);
+            const auto& d = disp[(size_t) v];
+            auto real = [&] (int r) { return in && r < (int) d.size() && ! d[(size_t) r].mark && ! d[(size_t) r].broken; };
+            int r = r0;
+            while (r <= r1)
+            {
+                juce::uint8 trans = 0x80;
+                std::vector<NpRow> rows;
+                if (real (r))
+                {
+                    const int e = d[(size_t) r].entry;
+                    trans = list[(size_t) e].trans;
+                    while (r <= r1 && real (r) && d[(size_t) r].entry == e) { rows.push_back (d[(size_t) r].row); ++r; }
+                }
+                else
+                    while (r <= r1 && ! real (r)) { rows.push_back (NpRow()); ++r; }
+                for (size_t i = 0; i < rows.size(); i += (size_t) NpTune::kMaxRows)
+                    segs[(size_t) v].push_back ({ trans, std::vector<NpRow> (rows.begin() + (long) i, rows.begin() + (long) std::min (rows.size(), i + (size_t) NpTune::kMaxRows)) });
+            }
+        }
+        int need = 0;
+        for (auto& s : segs) need += (int) s.size();
+        if (need > NpTune::kMaxSequence) { why = T ("Der markierte Bereich hat zu viele Abschnitte"); return false; }
+        int n = 1;
+        for (int v = 0; v < 3; ++v)
+        {
+            std::vector<NpTrackEntry> entries;
+            for (auto& s : segs[(size_t) v]) { t.setSequence (n, s.rows); entries.push_back ({ s.trans, (juce::uint8) n }); ++n; }
+            entries.push_back ({ 0xff, 0 });
+            t.setTrackAll (v, entries);
+        }
+        return true;
+    }
+    void copyToClip()
+    {
+        if (! selActive) { panel.status (T ("Erst einen Bereich markieren (Umschalt + Maus oder Umschalt + Pfeile)")); return; }
+        auto& c = panel.clip;
+        c = {};
+        c.voices = sv1 - sv0 + 1; c.rows = sr1 - sr0 + 1;
+        for (int j = 0; j < c.voices; ++j)
+            for (int i = 0; i < c.rows; ++i) c.data[(size_t) j].push_back (rowAt (sv0 + j, sr0 + i));
+        panel.status (T ("%1 Zeilen kopiert", c.rows));
+    }
+    void pasteFromClip()
+    {
+        auto& c = panel.clip;
+        if (c.rows == 0) { panel.status (T ("Nichts zum Einfügen: erst kopieren (Strg + C)")); return; }
+        std::map<int, std::vector<NpRow>> changed;
+        int written = 0;
+        for (int j = 0; j < c.voices && cv + j <= 2; ++j)
+        {
+            const int v = cv + j;
+            const auto list = panel.tune.trackList (v);
+            for (int i = 0; i < c.rows; ++i)
+            {
+                const int r = cr + i;
+                if (r >= (int) disp[(size_t) v].size()) break;
+                const auto& d = disp[(size_t) v][(size_t) r];
+                if (d.mark || d.broken) continue;
+                const int seq = list[(size_t) d.entry].seq;
+                auto it = changed.find (seq);
+                if (it == changed.end()) it = changed.emplace (seq, panel.tune.sequence (seq)).first;
+                if (d.rowIn < (int) it->second.size()) { it->second[(size_t) d.rowIn] = c.data[(size_t) j][(size_t) i]; ++written; }
+            }
+        }
+        if (written == 0) { panel.status (T ("Hier lässt sich nichts einfügen")); return; }
+        const int v0 = cv, v1 = std::min (2, cv + c.voices - 1), r0 = cr, r1 = cr + c.rows - 1;
+        panel.edit ([changed] (NpTune& t) { for (auto& kv : changed) t.setSequence (kv.first, kv.second); });
+        setSelection (v0, r0, v1, r1);
+        panel.status (T ("Eingefügt: %1 Zeilen", c.rows));
+    }
+    void clearSelectedCells()
+    {
+        if (! selActive) return;
+        std::map<int, std::vector<NpRow>> changed;
+        for (int v = sv0; v <= sv1; ++v)
+        {
+            const auto list = panel.tune.trackList (v);
+            for (int r = sr0; r <= sr1 && r < (int) disp[(size_t) v].size(); ++r)
+            {
+                const auto& d = disp[(size_t) v][(size_t) r];
+                if (d.mark || d.broken) continue;
+                const int seq = list[(size_t) d.entry].seq;
+                auto it = changed.find (seq);
+                if (it == changed.end()) it = changed.emplace (seq, panel.tune.sequence (seq)).first;
+                if (d.rowIn < (int) it->second.size()) it->second[(size_t) d.rowIn] = NpRow();
+            }
+        }
+        panel.edit ([changed] (NpTune& t) { for (auto& kv : changed) t.setSequence (kv.first, kv.second); });
+    }
+    NpRow rowAt (int v, int r) const
+    {
+        const auto& d = disp[(size_t) v];
+        return r < (int) d.size() && ! d[(size_t) r].mark && ! d[(size_t) r].broken ? d[(size_t) r].row : NpRow();
+    }
     void setCursorForTest (int voice, int row) { cv = juce::jlimit (0, 2, voice); cr = row; cf = 2; clampCursor(); repaint(); }
     int cursorVoice() const { return cv; }
     int cursorRow() const { return cr; }
@@ -311,7 +439,31 @@ public:
             const int x = voiceX (v);
             g.setColour (voiceColour (v, light).withAlpha (panel.muted[(size_t) v] ? 0.35f : 1.0f));
             g.setFont (font (13.0f, true));
-            g.drawText (T ("Stimme %1", v + 1), x, 0, voiceW(), headH, juce::Justification::centredLeft, false);
+            g.drawText (T ("Stimme %1", v + 1), x, 0, 72, headH, juce::Justification::centredLeft, false);
+            // loudspeaker: click mutes the voice
+            {
+                const bool m = panel.muted[(size_t) v];
+                const auto r = muteRect (v).toFloat();
+                const float cx = r.getX() + 3.0f, cy = r.getCentreY();
+                juce::Path sp;
+                sp.addRectangle (cx, cy - 3.0f, 4.0f, 6.0f);
+                sp.startNewSubPath (cx + 4.0f, cy - 3.0f); sp.lineTo (cx + 10.0f, cy - 7.0f); sp.lineTo (cx + 10.0f, cy + 7.0f); sp.lineTo (cx + 4.0f, cy + 3.0f); sp.closeSubPath();
+                g.setColour (m ? th.dim : voiceColour (v, light));
+                g.fillPath (sp);
+                if (! m)
+                {
+                    juce::Path waves;
+                    waves.addCentredArc (cx + 10.0f, cy, 4.0f, 6.0f, 0.0f, 0.38f * juce::MathConstants<float>::pi, 0.62f * juce::MathConstants<float>::pi, true);
+                    waves.addCentredArc (cx + 10.0f, cy, 8.0f, 9.0f, 0.0f, 0.40f * juce::MathConstants<float>::pi, 0.60f * juce::MathConstants<float>::pi, true);
+                    g.strokePath (waves, juce::PathStrokeType (1.5f));
+                }
+                else
+                {
+                    g.setColour (juce::Colour (0xffe0453b));
+                    g.drawLine (cx + 13.0f, cy - 5.0f, cx + 20.0f, cy + 5.0f, 2.0f);
+                    g.drawLine (cx + 13.0f, cy + 5.0f, cx + 20.0f, cy - 5.0f, 2.0f);
+                }
+            }
         }
         g.setFont (f);
         const int vis = visibleRows();
@@ -322,6 +474,8 @@ public:
             g.setColour (ui::rowColour (th, r));
             g.fillRect (0, y, getWidth() - bar.getWidth(), rowH);
             if (playHere) { g.setColour (juce::Colour (0xff2f9e44).withAlpha (0.35f)); g.fillRect (0, y, getWidth() - bar.getWidth(), rowH); }
+            if (selActive && r >= sr0 && r <= sr1)
+                for (int v = sv0; v <= sv1; ++v) { g.setColour (th.accent.withAlpha (0.28f)); g.fillRect (voiceX (v) - 4, y, voiceW() - 4, rowH); }
             g.setColour (th.dim);
             g.drawText (juce::String::toHexString (r).paddedLeft ('0', 3).toUpperCase(), 4, y, gutter - 8, rowH, juce::Justification::centredRight, false);
             for (int v = 0; v < 3; ++v)
@@ -360,23 +514,121 @@ public:
         }
     }
 
+    juce::Rectangle<int> muteRect (int v) const { return { voiceX (v) + 72, 3, 26, headH - 6 }; }
+
+    void updateCursor()
+    {
+        setMouseCursor (dragMoved ? juce::MouseCursor::UpDownLeftRightResizeCursor
+                                  : (selecting || juce::ModifierKeys::currentModifiers.isShiftDown()) ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor);
+    }
+    void modifierKeysChanged (const juce::ModifierKeys&) override { updateCursor(); }
+    void mouseMove (const juce::MouseEvent&) override { updateCursor(); }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         grabKeyboardFocus();
-        if (e.y < headH) return;
+        if (e.y < headH)
+        {
+            for (int v = 0; v < 3; ++v) if (muteRect (v).contains (e.getPosition())) panel.toggleMute (v);
+            return;
+        }
         const int r = first + (e.y - headH) / rowH;
         int v = -1;
         for (int i = 0; i < 3; ++i) if (e.x >= voiceX (i) - 4 && e.x < voiceX (i) + voiceW() - 4) v = i;
         if (v < 0 || r > total) return;
+        dragging = false; dragMoved = false;
+        if (e.mods.isShiftDown() && ! e.mods.isPopupMenu())     // mark an area
+        {
+            cancelTyping();
+            cv = v; cr = juce::jmin (r, juce::jmax (0, longestRows() - 1));
+            clampCursor();
+            selecting = true; selAV = v; selAR = cr;
+            setSelection (v, cr, v, cr);
+            updateCursor();
+            return;
+        }
         const int cw = charW();
         const int rel = e.x - voiceX (v);
-        int f = rel < cw * 5 ? 0 : rel < cw * 9 ? 1 : 2;
+        const int f = rel < cw * 5 ? 0 : rel < cw * 9 ? 1 : 2;
         cancelTyping();
-        cv = v; cr = r;
-        cf = f;
+        if (! e.mods.isPopupMenu()) clearSelection();
+        cv = v; cr = r; cf = f;
         clampCursor();
-        if (e.mods.isPopupMenu()) showMenu (e.getScreenPosition());
+        if (e.mods.isPopupMenu()) { showMenu (e.getScreenPosition()); repaint(); return; }
+        // a cell can be changed by pulling the mouse: up / down fast, left / right fine
+        if (const auto* d = current(); d != nullptr && ! d->broken && ! d->mark)
+        {
+            if (cf == 2) { dragging = true; dragStartVal = d->row.note == 0x7e ? 0 : d->row.note; }
+            else if (cf == 1)
+            {
+                dragging = true;
+                const int c = d->row.cmd;
+                if (c >= 0xc0) { dragMode = 'S'; dragStartVal = c - 0xc0; }
+                else { dragMode = 'I'; dragStartVal = c >= 0xa0 ? c - 0xa0 : -1; }
+            }
+            else if (cf == 0 && d->rowIn == 0)
+            {
+                dragging = true;
+                const auto te = panel.tune.trackAll (cv)[(size_t) d->entry];
+                dragSeq = te.seq; dragTrans = te.trans;
+            }
+        }
+        dragF = cf; dragLast = -9999;
         repaint();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (selecting)
+        {
+            const int last = std::max (0, longestRows() - 1);
+            const int r = juce::jlimit (0, last, first + (e.y - headH) / rowH);
+            const int v = juce::jlimit (0, 2, (e.x - gutter) / std::max (1, voiceW()));
+            if (e.y > getHeight() - rowH && first + visibleRows() < total + 2) { ++first; updateBar(); }
+            else if (e.y < headH + rowH && first > 0) { --first; updateBar(); }
+            setSelection (selAV, selAR, v, r);
+            return;
+        }
+        if (! dragging) return;
+        const auto off = e.getOffsetFromDragStart();
+        if (! dragMoved && std::abs (off.x) + std::abs (off.y) < 4) return;
+        if (! dragMoved) { dragMoved = true; updateCursor(); }
+        applyDrag (off.x, off.y);
+    }
+
+    void mouseUp (const juce::MouseEvent&) override { selecting = false; dragging = false; dragMoved = false; updateCursor(); }
+
+    void applyDrag (int dx, int dy)
+    {
+        const int vs = -dy / 6, hs = dx / 10;      // up = fast steps, right = fine steps
+        const auto* d = current();
+        if (d == nullptr) return;
+        const juce::String key = "drag" + juce::String (cv) + ":" + juce::String (cr) + ":" + juce::String (dragF);
+        if (dragF == 2)
+        {
+            const int n = juce::jlimit (0, 95, dragStartVal + vs * 6 + hs);
+            if (n != dragLast) { dragLast = n; setNote (n, key); }
+        }
+        else if (dragF == 1)
+        {
+            int cmd;
+            if (dragMode == 'S') cmd = 0xc0 + juce::jlimit (0, 63, dragStartVal + vs * 8 + hs);
+            else { const int n = juce::jlimit (-1, 31, dragStartVal + vs * 4 + hs); cmd = n < 0 ? 0x80 : 0xa0 + n; }
+            if (cmd != dragLast) { dragLast = cmd; setCommand (cmd, key); }
+        }
+        else if (dragF == 0)
+        {
+            const int seq = juce::jlimit (0, (int) NpTune::kMaxSequence, dragSeq + vs * 4), trans = juce::jlimit (0x80, 0xfd, dragTrans + hs);
+            const int code = seq * 256 + trans;
+            if (code == dragLast) return;
+            dragLast = code;
+            const int voice = cv, idx = d->entry;
+            panel.edit ([voice, idx, seq, trans] (NpTune& t)
+            {
+                t.setTrackEntry (voice, idx, { (juce::uint8) trans, (juce::uint8) seq });
+                if (! t.sequenceUsable (seq)) t.makeBlankSequence (seq, 16);
+            }, key);
+        }
     }
 
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
@@ -397,6 +649,11 @@ private:
     bool typing = false;
     juce::String cmdBuf, trackBuf;
     char cmdMode = 0;
+    bool selActive = false, selecting = false;       // the marked area
+    int selAV = 0, selAR = 0, sv0 = 0, sv1 = 0, sr0 = 0, sr1 = 0;
+    bool dragging = false, dragMoved = false;        // changing a value by pulling the mouse
+    int dragF = 0, dragStartVal = 0, dragSeq = 0, dragTrans = 0, dragLast = -9999;
+    char dragMode = 'I';
     static constexpr int rowH = 18, headH = 24, gutter = 40;
 
     int charW() const { return std::max (6, (int) std::ceil (juce::GlyphArrangement::getStringWidthInt (mono (14.0f), "0"))); }
@@ -446,8 +703,8 @@ private:
         return cr < (int) d.size() ? &d[(size_t) cr] : nullptr;
     }
     void move (int dv, int dr);
-    void setNote (int note);
-    void setCommand (int cmd);
+    void setNote (int note, const juce::String& key = {});
+    void setCommand (int cmd, const juce::String& key = {});
     void commitTrack (bool partialOk);
     void insertRow();
     void deleteRow();
@@ -456,6 +713,15 @@ private:
     void newSequenceForEntry();
     void duplicateSequenceForEntry();
     void showMenu (juce::Point<int> screen);
+    void extendSelection (int dv, int dr)
+    {
+        if (! selActive) { selAV = cv; selAR = cr; }
+        cancelTyping();
+        cv = juce::jlimit (0, 2, cv + dv);
+        cr = juce::jlimit (0, std::max (0, longestRows() - 1), cr + dr);
+        clampCursor();
+        setSelection (selAV, selAR, cv, cr);
+    }
 };
 
 // ================================================================================================ table grid
@@ -522,10 +788,27 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         grabKeyboardFocus();
+        dragging = false; dragMoved = false;
         if (e.y < headH) return;
         const int r = first + (e.y - headH) / rowH, c = (e.x - gutter) / colW();
-        if (r < panel.tune.tableRows (table) && c >= 0 && c < panel.tune.tableCols (table)) { row = r; col = c; half = false; repaint(); if (onFocusChanged) onFocusChanged(); }
+        if (r < panel.tune.tableRows (table) && c >= 0 && c < panel.tune.tableCols (table))
+        {
+            row = r; col = c; half = false;
+            dragging = true; dragStartVal = panel.tune.get (table, r, c); dragLast = -1;
+            repaint(); if (onFocusChanged) onFocusChanged();
+        }
     }
+    // pull with the mouse button held: up / down changes the value fast, left / right in fine steps
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging) return;
+        const auto off = e.getOffsetFromDragStart();
+        if (! dragMoved && std::abs (off.x) + std::abs (off.y) < 4) return;
+        if (! dragMoved) { dragMoved = true; setMouseCursor (juce::MouseCursor::UpDownLeftRightResizeCursor); }
+        const int v = juce::jlimit (0, 255, dragStartVal + (-off.y / 6) * 8 + off.x / 10);
+        if (v != dragLast) { dragLast = v; write (v); repaint(); }
+    }
+    void mouseUp (const juce::MouseEvent&) override { dragging = false; dragMoved = false; setMouseCursor (juce::MouseCursor::NormalCursor); }
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
     {
         first = juce::jlimit (0, std::max (0, panel.tune.tableRows (table) - visibleRows()), first - (int) std::lround (w.deltaY * 6.0f));
@@ -568,6 +851,8 @@ private:
     NpTune::Table table = NpTune::tabInstrument;
     int row = 0, col = 0, first = 0;
     bool half = false;
+    bool dragging = false, dragMoved = false;
+    int dragStartVal = 0, dragLast = -1;
     static constexpr int rowH = 18, headH = 24, gutter = 34;
 
     int step() const { return table == NpTune::tabPulse || table == NpTune::tabFilter ? 4 : table == NpTune::tabSlide ? 2 : 1; }
@@ -591,6 +876,7 @@ private:
 void PatternView::move (int dv, int dr)
 {
     cancelTyping();
+    selActive = false;
     if (dr != 0) cr = juce::jlimit (0, std::max (0, total), cr + dr);
     if (dv != 0)
     {
@@ -608,7 +894,7 @@ void PatternView::move (int dv, int dr)
     repaint();
 }
 
-void PatternView::setNote (int note)
+void PatternView::setNote (int note, const juce::String& key)
 {
     const auto* d = current();
     if (d == nullptr || d->mark || d->broken) return;
@@ -617,10 +903,10 @@ void PatternView::setNote (int note)
     {
         auto rows = t.sequence (seq);
         if (ri < (int) rows.size()) { rows[(size_t) ri].note = (juce::uint8) note; t.setSequence (seq, rows); }
-    });
+    }, key);
 }
 
-void PatternView::setCommand (int cmd)
+void PatternView::setCommand (int cmd, const juce::String& key)
 {
     const auto* d = current();
     if (d == nullptr || d->mark || d->broken) return;
@@ -629,7 +915,7 @@ void PatternView::setCommand (int cmd)
     {
         auto rows = t.sequence (seq);
         if (ri < (int) rows.size()) { rows[(size_t) ri].cmd = (juce::uint8) cmd; t.setSequence (seq, rows); }
-    });
+    }, key);
 }
 
 void PatternView::commitTrack (bool partialOk)
@@ -735,11 +1021,15 @@ void PatternView::showMenu (juce::Point<int> screen)
     m.addItem (4, T ("Track-Eintrag löschen (Strg + Entf)"));
     m.addItem (5, T ("Neue leere Sequenz für diesen Eintrag"));
     m.addItem (6, T ("Sequenz kopieren (Eintrag bekommt die Kopie)"));
+    m.addSeparator();
+    m.addItem (7, T ("Markierten Bereich kopieren (Strg + C)"), selActive);
+    m.addItem (8, T ("Einfügen (Strg + V)"), panel.clip.rows > 0);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (juce::Rectangle<int> (screen.x, screen.y, 1, 1)), [safe = juce::Component::SafePointer<PatternView> (this)] (int r)
     {
         if (safe == nullptr) return;
         switch (r) { case 1: safe->insertRow(); break; case 2: safe->deleteRow(); break; case 3: safe->insertEntry(); break; case 4: safe->deleteEntry(); break;
-                     case 5: safe->newSequenceForEntry(); break; case 6: safe->duplicateSequenceForEntry(); break; default: break; }
+                     case 5: safe->newSequenceForEntry(); break; case 6: safe->duplicateSequenceForEntry(); break;
+                     case 7: safe->copyToClip(); break; case 8: safe->pasteFromClip(); break; default: break; }
     });
 }
 
@@ -752,6 +1042,13 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
     if (ctrl && (code == juce::KeyPress::insertKey)) { insertEntry(); return true; }
     if (ctrl && (code == juce::KeyPress::deleteKey)) { deleteEntry(); return true; }
     if (ctrl) return false;
+    if (mods.isShiftDown())     // Shift + arrows mark an area
+    {
+        if (code == juce::KeyPress::upKey) { extendSelection (0, -1); return true; }
+        if (code == juce::KeyPress::downKey) { extendSelection (0, 1); return true; }
+        if (code == juce::KeyPress::leftKey) { extendSelection (-1, 0); return true; }
+        if (code == juce::KeyPress::rightKey) { extendSelection (1, 0); return true; }
+    }
     if (code == juce::KeyPress::upKey) { if (typing && cf == 0) commitTrack (true); move (0, -1); return true; }
     if (code == juce::KeyPress::downKey) { if (typing && cf == 0) commitTrack (true); move (0, 1); return true; }
     if (code == juce::KeyPress::leftKey) { if (typing && cf == 0) commitTrack (true); move (-1, 0); return true; }
@@ -763,6 +1060,7 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
     if (code == juce::KeyPress::insertKey) { insertRow(); return true; }
     if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey)
     {
+        if (selActive) { clearSelectedCells(); return true; }
         if (cf == 0) { if (typing) { cancelTyping(); repaint(); } else deleteEntry(); }
         else if (cf == 1) setCommand (0x80);
         else setNote (0);
@@ -858,9 +1156,10 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
         { &saveAsBtn, "Speichern (.vtracker)", [this] { saveFile (true); }, "Tune als .vtracker-Datei speichern (mit Dateiname); Strg + S speichert in die geöffnete Datei" },
         { &sidBtn, "Speichern (.sid)", [this] { exportSid(); }, "Als .sid-Datei speichern (spielbar in jedem SID-Abspielprogramm und im SID-Archiv)" },
         { &midiBtn, "Speichern (.mid)", [this] { exportMidi(); }, "Als MIDI-Datei speichern (über die SID-nach-MIDI-Umwandlung)" },
-        { &playBtn, "", [this] { play (false); }, "Von Anfang spielen (F1)" },
-        { &cursorBtn, "", [this] { play (true); }, "Ab der Cursor-Position spielen (F2)" },
+        { &playBtn, "", [this] { play(); }, "Spielt den ganzen Tune oder den markierten Bereich (F1)" },
         { &stopBtn, "", [this] { stop(); }, "Stopp (Esc)" },
+        { &copyBtn, "Kopieren", [this] { copySel(); }, "Den markierten Bereich kopieren (Strg + C); markiert wird mit Umschalt + Maus" },
+        { &pasteBtn, "Einfügen", [this] { pasteSel(); }, "An der Cursor-Position einfügen (Strg + V)" },
     };
     for (auto& e : list)
     {
@@ -870,26 +1169,17 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
         addAndMakeVisible (*e.b);
     }
     stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
-    playBtn.setButtonText (juce::String::fromUTF8 ("▶ ") + T ("Von vorn"));
-    cursorBtn.setButtonText (juce::String::fromUTF8 ("▶ ") + T ("Ab Cursor"));
-    for (auto* b : { &playBtn, &cursorBtn, &stopBtn })
+    playBtn.setButtonText (juce::String::fromUTF8 ("▶ ") + T ("Abspielen"));
+    for (auto* b : { &playBtn, &stopBtn })
     {
         const auto c = b == &stopBtn ? juce::Colour (0xffd0393a) : juce::Colour (0xff2f9e44);
         b->setColour (juce::TextButton::buttonColourId, c);
         b->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
     }
-    for (int v = 0; v < 3; ++v)
-    {
-        voiceMute[v].setButtonText (T ("Stimme %1 stumm", v + 1));
-        voiceMute[v].setClickingTogglesState (true);
-        voiceMute[v].onClick = [this, v]
-        {
-            muted[(size_t) v] = voiceMute[v].getToggleState();
-            main.player().setVoiceMuted (v, muted[(size_t) v]);
-            pattern->repaint();
-        };
-        addAndMakeVisible (voiceMute[v]);
-    }
+    addAndMakeVisible (repeatBtn);
+    repeatBtn.setToggleState ((bool) main.archive().settings.getProperty ("trackerRepeat", false), juce::dontSendNotification);
+    repeatBtn.setTooltip (T ("Wiederholen: den ganzen Tune oder den markierten Bereich immer wieder spielen"));
+    repeatBtn.onClick = [this] { main.archive().settings.setProperty ("trackerRepeat", repeatBtn.getToggleState(), nullptr); main.notifySettings(); applyPlayRange(); };
     for (auto* b : { &octMinus, &octPlus, &spdMinus, &spdPlus }) addAndMakeVisible (*b);
     octMinus.setButtonText ("-"); octPlus.setButtonText ("+"); spdMinus.setButtonText ("-"); spdPlus.setButtonText ("+");
     octMinus.onClick = [this] { setOctave (octave - 1); };
@@ -960,8 +1250,8 @@ void TrackerPanel::tuneChanged()
     spdLabel.setText (T ("Tempo %1", tune.speed()), juce::dontSendNotification);
     octLabel.setText (T ("Oktave %1", octave), juce::dontSendNotification);
     const auto pn = tune.playerName();
-    infoLabel.setText (T ("Variante %1", pn.isNotEmpty() ? pn : T ("unbekannt")) + "   ·   " + T ("%1 Sequenzen", (int) tune.usedSequences().size())
-                           + "   ·   " + T ("Länge etwa %1 s", juce::String (tune.estimateSeconds(), 1)), juce::dontSendNotification);
+    infoLabel.setText (T ("Variante %1", pn.isNotEmpty() ? pn : T ("unbekannt")) + U ("   ·   ") + T ("%1 Sequenzen", (int) tune.usedSequences().size())
+                           + U ("   ·   ") + T ("Länge etwa %1 s", juce::String (tune.estimateSeconds(), 1)), juce::dontSendNotification);
     repaint();
 }
 
@@ -1006,7 +1296,7 @@ void TrackerPanel::status (const juce::String& s) { statusLabel.setText (s, juce
 
 void TrackerPanel::updateTitle()
 {
-    window.setName (titleBase() + " – " + (file != juce::File() ? file.getFileName() : T ("Neuer Tune")) + (dirty ? " *" : ""));
+    window.setName (titleBase() + U (" – ") + (file != juce::File() ? file.getFileName() : T ("Neuer Tune")) + (dirty ? " *" : ""));
 }
 
 void TrackerPanel::setOctave (int o)
@@ -1029,31 +1319,58 @@ void TrackerPanel::selectTable (int i)
 }
 
 // ---- play
-void TrackerPanel::play (bool fromCursor)
+void TrackerPanel::play()
 {
     main.sidTab().stopPlayback();
     main.midiTab().stopPreview();
     main.player().stop();
     NpTune t = tune;
+    const int fpr = std::max (1, t.speed()) + 1;            // frames per row
+    int rows = pattern->longestRows();
     playStartRow = 0;
-    if (fromCursor)
+    if (pattern->hasSelection())                              // only the marked area
     {
-        std::array<int, 3> idx { 0, 0, 0 };
-        for (int v = 0; v < 3; ++v) idx[(size_t) v] = pattern->entryAt (v, pattern->cursorRow());
-        t = tune.withStartIndex (idx);
-        playStartRow = pattern->entryStartRow (pattern->cursorVoice(), idx[(size_t) pattern->cursorVoice()]);
+        int v0, v1, r0, r1;
+        pattern->selection (v0, v1, r0, r1);
+        juce::String why;
+        if (! pattern->buildRegionTune (t, v0, v1, r0, r1, why)) { status (why); return; }
+        rows = r1 - r0 + 1;
+        playStartRow = r0;
     }
+    if (rows <= 0) { status (T ("Der Tune lässt sich nicht abspielen")); return; }
     const auto psid = t.toPsid ("Tracker", "SIDiMIDI", "");
     const auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
-    const double secs = juce::jlimit (3.0, 600.0, t.estimateSeconds() + 1.0);
+    const double secs = juce::jlimit (2.0, 900.0, rows * fpr / 50.1245 + 1.5);
     auto tr = computeTrace (si, 1, secs);
     if (tr == nullptr || tr->empty()) { status (T ("Der Tune lässt sich nicht abspielen")); return; }
     for (int v = 0; v < 3; ++v) main.player().setVoiceMuted (v, muted[(size_t) v]);
     main.player().playTrace (*tr->events, tr->fps, tr->frames, 0, si.ntsc());
     playing = true;
-    playSpeed = std::max (1, t.speed()) + 1;      // frames per row
+    playSpeed = fpr;
+    playEndFrames = (juce::uint32) (rows * fpr);
+    playEndRow = playStartRow + rows - 1;
+    applyPlayRange();
     status ({});
 }
+
+// the tune or the marked area ends after its last row; with repeat it starts again at once (inside the audio thread, without a pause)
+void TrackerPanel::applyPlayRange()
+{
+    if (! playing) return;
+    const bool rep = repeatBtn.getToggleState();
+    main.player().setSidPlayRange (playEndFrames + (rep ? 0u : 25u), rep);
+}
+
+void TrackerPanel::toggleMute (int v)
+{
+    muted[(size_t) v] = ! muted[(size_t) v];
+    main.player().setVoiceMuted (v, muted[(size_t) v]);
+    pattern->repaint();
+}
+
+void TrackerPanel::copySel() { pattern->copyToClip(); }
+void TrackerPanel::pasteSel() { pattern->pasteFromClip(); }
+void TrackerPanel::cutSel() { pattern->copyToClip(); if (pattern->hasSelection()) pattern->clearSelectedCells(); }
 
 void TrackerPanel::stop()
 {
@@ -1073,7 +1390,7 @@ void TrackerPanel::timerCallback()
         pattern->setPlayRow (-1);
         return;
     }
-    pattern->setPlayRow (playStartRow + (int) (pl.getPlayFrame() / (juce::uint32) playSpeed));
+    pattern->setPlayRow (std::min (playEndRow, playStartRow + (int) (pl.getPlayFrame() / (juce::uint32) playSpeed)));
 }
 
 // ---- files
@@ -1150,7 +1467,7 @@ void TrackerPanel::openD64()
             safe->stop();
             safe->loadTune (t, {});
             safe->titleEd.setText (f.name, false);
-            safe->window.setName (titleBase() + " – " + f.name);
+            safe->window.setName (titleBase() + U (" – ") + f.name);
             safe->status (T ("Geladen: %1 (Variante %2)", f.name, t.playerName()));
         });
     });
@@ -1171,7 +1488,7 @@ void TrackerPanel::importMidi (const juce::File& midi)
     loadTune (r.tune, {});
     titleEd.setText (midi.getFileNameWithoutExtension(), false);
     dirty = true;                                   // not saved yet
-    window.setName (titleBase() + " – " + midi.getFileNameWithoutExtension() + " *");
+    window.setName (titleBase() + U (" – ") + midi.getFileNameWithoutExtension() + " *");
     status (T ("MIDI umgewandelt: %1", midi.getFileName()));
     juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("MIDI → Vibrants-Tracker"), r.report + "\n\n" + T ("Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten."));
 }
@@ -1243,11 +1560,11 @@ void TrackerPanel::resized()
     }
     r.removeFromTop (6);
     auto row2 = r.removeFromTop (28);
-    playBtn.setBounds (row2.removeFromLeft (96)); row2.removeFromLeft (4);
-    cursorBtn.setBounds (row2.removeFromLeft (110)); row2.removeFromLeft (4);
-    stopBtn.setBounds (row2.removeFromLeft (44)); row2.removeFromLeft (14);
-    for (int v = 0; v < 3; ++v) { voiceMute[v].setBounds (row2.removeFromLeft (118)); row2.removeFromLeft (4); }
-    row2.removeFromLeft (10);
+    playBtn.setBounds (row2.removeFromLeft (118)); row2.removeFromLeft (4);
+    stopBtn.setBounds (row2.removeFromLeft (44)); row2.removeFromLeft (4);
+    repeatBtn.setBounds (row2.removeFromLeft (40)); row2.removeFromLeft (22);
+    copyBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (4);
+    pasteBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (22);
     spdMinus.setBounds (row2.removeFromLeft (28)); spdLabel.setBounds (row2.removeFromLeft (80)); spdPlus.setBounds (row2.removeFromLeft (28)); row2.removeFromLeft (12);
     octMinus.setBounds (row2.removeFromLeft (28)); octLabel.setBounds (row2.removeFromLeft (90)); octPlus.setBounds (row2.removeFromLeft (28));
     r.removeFromTop (4);
@@ -1287,12 +1604,19 @@ void TrackerPanel::paint (juce::Graphics& g)
 bool TrackerPanel::keyPressed (const juce::KeyPress& k)
 {
     const auto code = k.getKeyCode();
-    if (code == juce::KeyPress::F1Key) { play (false); return true; }
-    if (code == juce::KeyPress::F2Key) { play (true); return true; }
-    if (code == juce::KeyPress::escapeKey) { stop(); return true; }
+    if (code == juce::KeyPress::F1Key) { play(); return true; }
+    if (code == juce::KeyPress::escapeKey)
+    {
+        if (playing) stop();
+        else if (pattern->hasSelection()) pattern->clearSelection();
+        return true;
+    }
     const auto ctrlKey = [&k] (char c) { return k == juce::KeyPress (c, juce::ModifierKeys::ctrlModifier, 0); };
     if (ctrlKey ('z')) { undo(); return true; }
     if (ctrlKey ('y')) { redo(); return true; }
+    if (ctrlKey ('c')) { copySel(); return true; }
+    if (ctrlKey ('v')) { pasteSel(); return true; }
+    if (ctrlKey ('x')) { cutSel(); return true; }
     if (ctrlKey ('s')) { saveFile (false); return true; }
     if (ctrlKey ('o')) { confirmDiscard ([this] { openFile(); }); return true; }
     if (ctrlKey ('n')) { confirmDiscard ([this] { newTune(); }); return true; }
@@ -1334,6 +1658,16 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
     // keys: typed into the pattern like at the keyboard; "_" = cursor down, "^" = cursor up, ">" = right, "<" = left, "#" = Return, "~" = Delete
     for (auto c : keys)
     {
+        // test only: { } ` = mark with Shift + down / right / up / left, @ copy, $ paste
+        if (c == '{' || c == '}' || c == '`' || c == '=')
+        {
+            const int k = c == '{' ? juce::KeyPress::downKey : c == '}' ? juce::KeyPress::rightKey : c == '`' ? juce::KeyPress::upKey : juce::KeyPress::leftKey;
+            content->pattern->keyPressed (juce::KeyPress (k, juce::ModifierKeys (juce::ModifierKeys::shiftModifier), 0));
+            continue;
+        }
+        if (c == '@') { content->copySel(); continue; }
+        if (c == '$') { content->pasteSel(); continue; }
+        if (c == '%') { content->toggleMute (0); continue; }
         int code = c;
         if (c == '_') code = juce::KeyPress::downKey; else if (c == '^') code = juce::KeyPress::upKey;
         else if (c == '>') code = juce::KeyPress::rightKey; else if (c == '<') code = juce::KeyPress::leftKey;
@@ -1345,7 +1679,7 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
         const auto psid = content->exportPsid();
         exportSid.replaceWithData (psid.getData(), psid.getSize());
     }
-    if (play) content->play (false);
+    if (play) content->play();
 }
 
 TrackerWindow::~TrackerWindow()

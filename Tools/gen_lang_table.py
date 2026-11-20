@@ -500,6 +500,23 @@ ROWS = [
 ("Nächster Song (Subtune) dieses Tunes", "Next song (sub-tune) of this tune", "Morceau (sous-morceau) suivant de ce fichier"),
 ("Vorheriger Tune der Liste (Alt + ←)", "Previous tune in the list (Alt + ←)", "Fichier précédent de la liste (Alt + ←)"),
 ("Nächster Tune der Liste (Alt + →)", "Next tune in the list (Alt + →)", "Fichier suivant de la liste (Alt + →)"),
+# ---- tracker: marking, copy, repeat
+('Abspielen', 'Play', 'Lire'),
+('Kopieren', 'Copy', 'Copier'),
+('Einfügen', 'Paste', 'Coller'),
+('Spielt den ganzen Tune oder den markierten Bereich (F1)', 'Plays the whole tune or the marked area (F1)', 'Joue tout le morceau ou la zone marquée (F1)'),
+('Den markierten Bereich kopieren (Strg + C); markiert wird mit Umschalt + Maus', 'Copy the marked area (Ctrl + C); mark with Shift + mouse', 'Copier la zone marquée (Ctrl + C) ; marquer avec Maj + souris'),
+('An der Cursor-Position einfügen (Strg + V)', 'Paste at the cursor position (Ctrl + V)', 'Coller à la position du curseur (Ctrl + V)'),
+('Wiederholen: den ganzen Tune oder den markierten Bereich immer wieder spielen', 'Repeat: play the whole tune or the marked area again and again', 'Répéter : jouer tout le morceau ou la zone marquée sans fin'),
+('%1 Zeilen × %2 Stimmen markiert – Strg + C kopiert, F1 spielt nur diesen Bereich', '%1 rows × %2 voices marked – Ctrl + C copies, F1 plays only this area', '%1 lignes × %2 voix marquées – Ctrl + C copie, F1 ne joue que cette zone'),
+('Der markierte Bereich hat zu viele Abschnitte', 'The marked area has too many sections', 'La zone marquée a trop de sections'),
+('Erst einen Bereich markieren (Umschalt + Maus oder Umschalt + Pfeile)', 'Mark an area first (Shift + mouse or Shift + arrows)', 'Marquez d’abord une zone (Maj + souris ou Maj + flèches)'),
+('%1 Zeilen kopiert', '%1 rows copied', '%1 lignes copiées'),
+('Nichts zum Einfügen: erst kopieren (Strg + C)', 'Nothing to paste: copy first (Ctrl + C)', 'Rien à coller : copiez d’abord (Ctrl + C)'),
+('Hier lässt sich nichts einfügen', 'Nothing can be pasted here', 'Rien ne peut être collé ici'),
+('Eingefügt: %1 Zeilen', 'Pasted: %1 rows', 'Collé : %1 lignes'),
+('Markierten Bereich kopieren (Strg + C)', 'Copy the marked area (Ctrl + C)', 'Copier la zone marquée (Ctrl + C)'),
+('Einfügen (Strg + V)', 'Paste (Ctrl + V)', 'Coller (Ctrl + V)'),
 ]
 
 def esc(s):

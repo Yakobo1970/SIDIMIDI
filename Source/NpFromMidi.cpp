@@ -374,7 +374,7 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     r << T ("Abweichung vom MIDI-Tempo: %1 % (Rasterung auf ganze Frames)", juce::String (tempoError * 100.0, 1)) << "\n";
     for (int v = 0; v < 3; ++v)
         r << T ("Stimme %1: %2", v + 1, voices[(size_t) v].label.isNotEmpty() ? voices[(size_t) v].label : T ("leer"))
-          << (voices[(size_t) v].drums ? " – " + T ("Schlagzeug") : juce::String()) << "\n";
+          << (voices[(size_t) v].drums ? U (" – ") + T ("Schlagzeug") : juce::String()) << "\n";
     r << T ("%1 Akkorde als Arpeggio, %2 Schlagzeug-Anschläge, %3 Instrumente, %4 Sequenzen", chords, hits, b.nextIns - 1, used);
     if (rowsKept < totalRows) r << "\n" << T ("Der Tune war zu lang für 112 Sequenzen und wurde nach %1 Zeilen gekürzt", rowsKept);
     if (b.overflowIns) r << "\n" << T ("Es gibt mehr als 31 Klangvarianten: die übrigen bekamen das erste Instrument");
