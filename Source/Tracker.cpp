@@ -189,7 +189,7 @@ public:
     void newTune();
     void openFile();
     void openD64();
-    void importMidi (const juce::File& midi, std::array<int, 3> parts = { { -2, -2, -2 } });
+    void importMidi (const juce::File& midi, std::array<int, 3> parts = { { -2, -2, -2 } }, std::array<int, 3> roles = { { 0, 0, 0 } });
     void chooseMidi();
     void saveFile (bool saveAs);
     void exportSid();
@@ -1531,17 +1531,22 @@ void TrackerPanel::chooseMidi()
                          [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f) { if (safe != nullptr) safe->importMidi (f); });
 }
 
-void TrackerPanel::importMidi (const juce::File& midi, std::array<int, 3> parts)
+void TrackerPanel::importMidi (const juce::File& midi, std::array<int, 3> parts, std::array<int, 3> roles)
 {
     stop();
-    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, parts);
+    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, parts, roles);
     if (! r.ok) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", r.report); return; }
     loadTune (r.tune, {});
     titleEd.setText (midi.getFileNameWithoutExtension(), false);
     dirty = true;                                   // not saved yet
     window.setName (titleBase() + U (" – ") + midi.getFileNameWithoutExtension() + " *");
     status (T ("MIDI umgewandelt: %1", midi.getFileName()));
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("MIDI → Vibrants-Tracker"), r.report + "\n\n" + T ("Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten."));
+    // the tracker comes to the front (the dialog of the track choice is still closing, so once more after a moment and after the notice)
+    window.setVisible (true);
+    window.toFront (true);
+    juce::Timer::callAfterDelay (250, [safe = juce::Component::SafePointer<TrackerPanel> (this)] { if (safe != nullptr) safe->window.toFront (true); });
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, T ("MIDI → Vibrants-Tracker"), r.report + "\n\n" + T ("Der Tune ist noch nicht gespeichert. Zum Anhören F1 drücken; Klänge und Tabellen lassen sich rechts nachbearbeiten."),
+                                            {}, nullptr, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<TrackerPanel> (this)] (int) { if (safe != nullptr) safe->window.toFront (true); }));
 }
 
 void TrackerPanel::saveFile (bool saveAs)
@@ -1689,9 +1694,9 @@ TrackerWindow::TrackerWindow (MainComponent& m)
     content->pattern->grabKeyboardFocus();
 }
 
-void TrackerWindow::importMidiFile (const juce::File& midi, std::array<int, 3> parts)
+void TrackerWindow::importMidiFile (const juce::File& midi, std::array<int, 3> parts, std::array<int, 3> roles)
 {
-    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi, parts] { if (safe != nullptr) safe->content->importMidi (midi, parts); });
+    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi, parts, roles] { if (safe != nullptr) safe->content->importMidi (midi, parts, roles); });
 }
 
 void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bool play, const juce::String& keys, const juce::File& exportSid)

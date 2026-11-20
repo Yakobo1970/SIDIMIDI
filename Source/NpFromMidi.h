@@ -14,7 +14,8 @@ struct NpImport
     juce::String report;       // what was done (tempo, voices, chords, sequences …) or why it failed
 };
 
+// roles: 0 automatic (GM program / channel), 1 lead, 2 bass, 3 pad, 4 drums
 // parts: MIDI tracks for the three voices, as in MidiToSidCoreEngine::ChannelSuggestion::partId(); -2 = automatic
 NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t templateSize,
-                       std::array<int, 3> parts = { { -2, -2, -2 } });
+                       std::array<int, 3> parts = { { -2, -2, -2 } }, std::array<int, 3> roles = { { 0, 0, 0 } });
 } // namespace sm

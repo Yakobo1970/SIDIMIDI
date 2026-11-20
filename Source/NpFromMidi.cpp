@@ -22,6 +22,7 @@ struct InVoice
     double avgPitch = 60;
     juce::String label;
     bool drums = false;
+    int role = 0;              // 0 automatic, 1 lead, 2 bass, 3 pad, 4 drums
 };
 
 enum { wTri = 0x11, wSaw = 0x21, wPulse = 0x41, wNoise = 0x81 };
@@ -33,6 +34,9 @@ const Timbre kTri { wTri, 0x08, 0xa6, false, "tri" }, kSaw { wSaw, 0x06, 0xc5, f
 Timbre pickTimbre (const InVoice& v)
 {
     const int p = v.program;
+    if (v.role == 1) return kLead;
+    if (v.role == 2) return kBass;
+    if (v.role == 3) return kPad;
     if (p >= 32 && p <= 39) return kBass;
     if ((p >= 80 && p <= 87) || (p >= 96 && p <= 103)) return kLead;
     if ((p >= 88 && p <= 95) || (p >= 48 && p <= 55)) return kPad;
@@ -199,7 +203,7 @@ std::vector<NpRow> buildDrums (const InVoice& v, double rowSec, int totalRows, B
 }
 } // namespace
 
-NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t templateSize, std::array<int, 3> parts)
+NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t templateSize, std::array<int, 3> parts, std::array<int, 3> roles)
 {
     NpImport out;
     juce::String err;
@@ -287,7 +291,8 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
             }
         }
         if (! iv.notes.empty()) iv.avgPitch = sum / (double) iv.notes.size();
-        iv.drums = iv.channel == 10;
+        iv.role = juce::jlimit (0, 4, roles[(size_t) v]);
+        iv.drums = iv.role == 4 || (iv.role == 0 && iv.channel == 10);
     }
 
     double endTime = 0, firstStart = 1e9;

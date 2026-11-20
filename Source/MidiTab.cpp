@@ -198,7 +198,7 @@ public:
         timeLabel.setFont (font (15.0f, true));
         timeLabel.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (timeLabel);
-        help.setText (toTracker ? T ("Wähle bis zu drei Spuren für die drei Tracker-Stimmen (Stimme 1 ist die tiefste, 3 die höchste). Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.")
+        help.setText (toTracker ? T ("Wähle bis zu drei Spuren für die drei Tracker-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.")
                                 : T ("Wähle bis zu drei Spuren für die drei SID-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar."),
                       juce::dontSendNotification);
         help.setFont (font (13.0f));
@@ -247,7 +247,7 @@ public:
 
     // ---- list rows
     int getNumRows() override { return (int) tracks.size(); }
-    int roleWidth() const { return toTracker ? 0 : 146; }
+    int roleWidth() const { return 146; }
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool) override
     {
         const auto& th = theme();
@@ -296,7 +296,6 @@ public:
             voice.addItem (juce::String::fromUTF8 ("—"), 1);
             for (int i = 1; i <= 3; ++i) voice.addItem (T ("Stimme %1", i), i + 1);
             role.addItem (T ("Automatisch"), 1); role.addItem ("Lead", 2); role.addItem ("Bass", 3); role.addItem ("Pad", 4); role.addItem (T ("Schlagzeug"), 5);
-            role.setVisible (! p.toTracker);
             play.onClick = [this] { panel.toggleTrack (row); };
             voice.onChange = [this]
             {
@@ -330,7 +329,7 @@ public:
         {
             auto r = getLocalBounds().reduced (2, 3);
             play.setBounds (r.removeFromLeft (38)); r.removeFromLeft (4);
-            if (! panel.toTracker) { role.setBounds (r.removeFromRight (140)); r.removeFromRight (6); }
+            role.setBounds (r.removeFromRight (140)); r.removeFromRight (6);
             voice.setBounds (r.removeFromRight (110));
         }
         TrackPickPanel& panel;
@@ -423,7 +422,7 @@ public:
         for (size_t i = 0; i < tracks.size(); ++i)
             if (voiceOf[i] > 0) { trackIdx[(size_t) voiceOf[i] - 1] = tracks[i].partId(); roles[(size_t) voiceOf[i] - 1] = roleOf[i]; }
         stopAll();
-        if (toTracker) tab.convertToTracker (itemIndex, trackIdx);
+        if (toTracker) tab.convertToTracker (itemIndex, trackIdx, roles);
         else tab.convertTracks (itemIndex, trackIdx, roles, false);
         closeLater();
     }
@@ -910,12 +909,12 @@ void MidiTab::convert (int idx, Depth depth)
     }
 }
 
-void MidiTab::convertToTracker (int idx, const std::array<int, 3>& parts)
+void MidiTab::convertToTracker (int idx, const std::array<int, 3>& parts, const std::array<int, 3>& roles)
 {
     const auto* m = item (idx);
     if (m == nullptr) return;
     main.openTracker();
-    if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file, parts);
+    if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file, parts, roles);
 }
 
 void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip)

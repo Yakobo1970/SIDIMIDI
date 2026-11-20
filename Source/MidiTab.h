@@ -42,7 +42,7 @@ public:
     enum class Depth { quick, targeted, roundTrip, tracker };
     void convert (int itemIndex, Depth depth);
     void convertTracks (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip);
-    void convertToTracker (int itemIndex, const std::array<int, 3>& parts);     // parts: MIDI tracks for the three voices (-1 = none)
+    void convertToTracker (int itemIndex, const std::array<int, 3>& parts, const std::array<int, 3>& roles);     // parts: MIDI tracks for the three voices (-1 = none); roles as in the targeted conversion
     void playMidi (int itemIndex);
     void playSidResult (int itemIndex);
     const MidiItem* item (int index) const { return index >= 0 && index < (int) items.size() ? &items[(size_t) index] : nullptr; }
