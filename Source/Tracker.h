@@ -19,7 +19,7 @@ public:
     ~TrackerWindow() override;
     void closeButtonPressed() override;
     TrackerPanel& panel() { return *content; }
-    void importMidiFile (const juce::File& midi);         // MIDI -> NewPlayer tune, loaded into the tracker (asks before it drops unsaved changes)
+    void importMidiFile (const juce::File& midi, std::array<int, 3> parts = { { -2, -2, -2 } });         // MIDI -> NewPlayer tune, loaded into the tracker (asks before it drops unsaved changes)
     void setupForTest (const juce::File& tune, int row, int voice, bool play, const juce::String& keys = {}, const juce::File& exportSid = {});   // UiShot: load, put the cursor, optionally play
     std::function<void()> onClosed;                 // the owner drops the window
 

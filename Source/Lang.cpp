@@ -101,7 +101,6 @@ const Row kRows[] = {
     { "Konvertieren", "Convert", "Convertir" },
     { "Abbrechen", "Cancel", "Annuler" },
     { "Vorhören stoppen", "Stop preview", "Arrêter l'écoute" },
-    { "Wähle bis zu drei Spuren für die drei SID-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ lässt sich jede Spur einzeln vorhören.", "Choose up to three tracks for the three SID voices (voice 1 is the lowest, 3 the highest) and give each a role. ▶ plays each track on its own.", "Choisissez jusqu'à trois pistes pour les trois voix SID (la voix 1 est la plus grave, la 3 la plus aiguë) et attribuez un rôle à chacune. ▶ permet d'écouter chaque piste séparément." },
     { "Gezielt konvertieren: %1", "Targeted conversion: %1", "Conversion ciblée : %1" },
     { "Stimme %1", "Voice %1", "Voix %1" },
     { "Automatisch", "Automatic", "Automatique" },
@@ -532,6 +531,13 @@ const Row kRows[] = {
     { "Einen Halbton tiefer (Strg + ↓)", "One semitone down (Ctrl + ↓)", "Un demi-ton plus bas (Ctrl + ↓)" },
     { "Eine Oktave höher (Strg + Umschalt + ↑)", "One octave up (Ctrl + Shift + ↑)", "Une octave plus haut (Ctrl + Maj + ↑)" },
     { "Eine Oktave tiefer (Strg + Umschalt + ↓)", "One octave down (Ctrl + Shift + ↓)", "Une octave plus bas (Ctrl + Maj + ↓)" },
+    { "Wähle bis zu drei Spuren für die drei SID-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.", "Choose up to three tracks for the three SID voices (voice 1 is the lowest, 3 the highest) and give each a role. ▶ switches tracks on and off for listening, several at once – green means audible.", "Choisissez jusqu’à trois pistes pour les trois voix SID (la voix 1 est la plus grave, la 3 la plus aiguë) et attribuez un rôle à chacune. ▶ active et désactive les pistes à l’écoute, plusieurs à la fois – vert signifie audible." },
+    { "Wähle bis zu drei Spuren für die drei Tracker-Stimmen (Stimme 1 ist die tiefste, 3 die höchste). Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.", "Choose up to three tracks for the three tracker voices (voice 1 is the lowest, 3 the highest). ▶ switches tracks on and off for listening, several at once – green means audible.", "Choisissez jusqu’à trois pistes pour les trois voix du tracker (la voix 1 est la plus grave, la 3 la plus aiguë). ▶ active et désactive les pistes à l’écoute, plusieurs à la fois – vert signifie audible." },
+    { "In den Tracker laden", "Load into the tracker", "Charger dans le tracker" },
+    { "Spuren für den Tracker wählen: %1", "Choose tracks for the tracker: %1", "Choisir les pistes pour le tracker : %1" },
+    { "Spielt die Spuren, die einer Stimme zugeordnet sind (ohne Zuordnung: alle Spuren)", "Plays the tracks that are assigned to a voice (none assigned: all tracks)", "Joue les pistes attribuées à une voix (aucune attribuée : toutes les pistes)" },
+    { "Die Spur lässt sich nicht vorhören", "The track cannot be played", "La piste ne peut pas être écoutée" },
+    { "Diese Spur ein- oder ausschalten (hörbar = grün); mehrere Spuren gleichzeitig sind möglich", "Switch this track on or off (audible = green); several tracks can play together", "Activer ou désactiver cette piste (audible = vert) ; plusieurs pistes peuvent jouer ensemble" },
     // ---- table end
 };
 

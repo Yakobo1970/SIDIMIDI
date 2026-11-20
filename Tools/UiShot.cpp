@@ -47,7 +47,7 @@ public:
             if (const auto t = arg ("tab"); t.isNotEmpty()) main.selectTab (t.getIntValue());
             if (const auto f = arg ("filter"); f.isNotEmpty()) main.sidTab().table().setGlobalSearch (f);
             if (const auto f = arg ("midi"); f.isNotEmpty()) { main.selectTab (1); main.midiTab().openFolder (juce::File (f)); wait (2500); }
-            if (const auto f = arg ("targeted"); f.isNotEmpty()) { main.midiTab().openTrackPanelForTest (f.getIntValue()); wait (300); }
+            if (const auto f = arg ("targeted"); f.isNotEmpty()) { main.midiTab().openTrackPanelForTest (f.getIntValue(), arg ("targeted", 2) == "trk"); wait (300); }
             wait (400);
             if (const auto s = arg ("select"); s.isNotEmpty())
             {

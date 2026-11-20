@@ -210,8 +210,18 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     bool roundTrip = false;
     std::array<MidiToSidCoreEngine::ChannelSuggestion, 3> sug;
     if (! MidiToSidCoreEngine::analyzeMidiFile (midi, roundTrip, sug, log)) { out.report = T ("Die MIDI-Datei lässt sich nicht analysieren"); return out; }
-    for (int v = 0; v < 3; ++v)
-        if (parts[(size_t) v] == -2) parts[(size_t) v] = sug[(size_t) v].channel > 0 || sug[(size_t) v].trackIndex >= 0 ? sug[(size_t) v].partId() : -1;
+    std::array<juce::String, 3> labels;
+    {
+        std::vector<MidiToSidCoreEngine::ChannelSuggestion> all;
+        juce::String l2;
+        MidiToSidCoreEngine::listAllTracks (midi, all, l2);
+        for (int v = 0; v < 3; ++v)
+        {
+            if (parts[(size_t) v] == -2) parts[(size_t) v] = sug[(size_t) v].channel > 0 || sug[(size_t) v].trackIndex >= 0 ? sug[(size_t) v].partId() : -1;
+            labels[(size_t) v] = sug[(size_t) v].label;
+            for (auto& c : all) if (parts[(size_t) v] >= 0 && c.partId() == parts[(size_t) v]) labels[(size_t) v] = c.label;
+        }
+    }
 
     juce::FileInputStream in (midi);
     juce::MidiFile mf;
@@ -252,7 +262,7 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     {
         auto& iv = voices[(size_t) v];
         const int part = parts[(size_t) v];
-        iv.label = part >= 0 ? sug[(size_t) v].label : juce::String();
+        iv.label = part >= 0 ? labels[(size_t) v] : juce::String();
         if (part < 0) continue;
         const int idx = part & 0xffff, chan = (part >> 16) & 0x1f;
         if (idx >= mf.getNumTracks()) continue;

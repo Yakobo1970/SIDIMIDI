@@ -42,12 +42,13 @@ public:
     enum class Depth { quick, targeted, roundTrip, tracker };
     void convert (int itemIndex, Depth depth);
     void convertTracks (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip);
+    void convertToTracker (int itemIndex, const std::array<int, 3>& parts);     // parts: MIDI tracks for the three voices (-1 = none)
     void playMidi (int itemIndex);
     void playSidResult (int itemIndex);
     const MidiItem* item (int index) const { return index >= 0 && index < (int) items.size() ? &items[(size_t) index] : nullptr; }
     int itemOfRow (int row) const { return row >= 0 && row < (int) shown.size() ? shown[(size_t) row] : -1; }
     void selectFirstForTest() { if (! shown.empty()) table.selectRow (0); }
-    void openTrackPanelForTest (int itemIndex) { convert (itemIndex, Depth::targeted); }
+    void openTrackPanelForTest (int itemIndex, bool tracker = false) { convert (itemIndex, tracker ? Depth::tracker : Depth::targeted); }
 
 private:
     MainComponent& main;

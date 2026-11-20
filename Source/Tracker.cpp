@@ -189,7 +189,7 @@ public:
     void newTune();
     void openFile();
     void openD64();
-    void importMidi (const juce::File& midi);
+    void importMidi (const juce::File& midi, std::array<int, 3> parts = { { -2, -2, -2 } });
     void chooseMidi();
     void saveFile (bool saveAs);
     void exportSid();
@@ -1531,10 +1531,10 @@ void TrackerPanel::chooseMidi()
                          [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f) { if (safe != nullptr) safe->importMidi (f); });
 }
 
-void TrackerPanel::importMidi (const juce::File& midi)
+void TrackerPanel::importMidi (const juce::File& midi, std::array<int, 3> parts)
 {
     stop();
-    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize);
+    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, parts);
     if (! r.ok) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", r.report); return; }
     loadTune (r.tune, {});
     titleEd.setText (midi.getFileNameWithoutExtension(), false);
@@ -1689,9 +1689,9 @@ TrackerWindow::TrackerWindow (MainComponent& m)
     content->pattern->grabKeyboardFocus();
 }
 
-void TrackerWindow::importMidiFile (const juce::File& midi)
+void TrackerWindow::importMidiFile (const juce::File& midi, std::array<int, 3> parts)
 {
-    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi] { if (safe != nullptr) safe->content->importMidi (midi); });
+    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi, parts] { if (safe != nullptr) safe->content->importMidi (midi, parts); });
 }
 
 void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bool play, const juce::String& keys, const juce::File& exportSid)

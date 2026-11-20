@@ -157,37 +157,62 @@ public:
 };
 
 // ================================================================================================ track panel ("Gezielt")
-class TrackPickPanel : public Overlay, private juce::ListBoxModel
+// choose the MIDI tracks for the three voices (target: a SID file or the Vibrants-Tracker); every track can be listened to,
+// several at once, with the oscillators and a small picture of its notes over the whole length
+class TrackPickPanel : public Overlay, private juce::ListBoxModel, private juce::Timer
 {
 public:
     using Track = MidiToSidCoreEngine::ChannelSuggestion;
+    static constexpr int kMiniW = 190, kMiniH = 26;
 
-    TrackPickPanel (MainComponent& m, MidiTab& t, int idx, std::vector<Track> tr, std::array<int, 3> pre)
-        : Overlay (m), tab (t), itemIndex (idx), tracks (std::move (tr))
+    TrackPickPanel (MainComponent& m, MidiTab& t, int idx, std::vector<Track> tr, std::array<int, 3> pre, bool tracker = false)
+        : Overlay (m), tab (t), itemIndex (idx), tracks (std::move (tr)), toTracker (tracker)
     {
-        boxWidth = 880; boxHeight = 600;
+        boxWidth = 960; boxHeight = 660;
         voiceOf.assign (tracks.size(), 0);
         roleOf.assign (tracks.size(), 0);
+        active.assign (tracks.size(), 0);
         for (int v = 0; v < 3; ++v)
             for (size_t i = 0; i < tracks.size(); ++i)
                 if (tracks[i].partId() == pre[(size_t) v]) voiceOf[i] = v + 1;
+        buildMinis();
         list.setModel (this);
         list.setRowHeight (34);
         addAndMakeVisible (list);
-        convertBtn.setButtonText (T ("Konvertieren"));
+        convertBtn.setButtonText (toTracker ? T ("In den Tracker laden") : T ("Konvertieren"));
         cancelBtn.setButtonText (T ("Abbrechen"));
-        stopBtn.setButtonText (juce::String::fromUTF8 ("■ ") + T ("Vorhören stoppen"));
+        playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
+        playBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
+        playBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        playBtn.setTooltip (T ("Spielt die Spuren, die einer Stimme zugeordnet sind (ohne Zuordnung: alle Spuren)"));
+        stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
         stopBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffd0393a));
         stopBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        stopBtn.setTooltip (T ("Vorhören stoppen"));
         convertBtn.onClick = [this] { run(); };
-        cancelBtn.onClick = [this] { main.player().stop(); closeLater(); };
-        stopBtn.onClick = [this] { main.player().stop(); };
-        for (auto* b : { &convertBtn, &cancelBtn, &stopBtn }) addAndMakeVisible (b);
-        help.setText (T ("Wähle bis zu drei Spuren für die drei SID-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ lässt sich jede Spur einzeln vorhören."), juce::dontSendNotification);
+        cancelBtn.onClick = [this] { stopAll(); closeLater(); };
+        stopBtn.onClick = [this] { stopAll(); };
+        playBtn.onClick = [this] { playAssigned(); };
+        for (auto* b : { &convertBtn, &cancelBtn, &stopBtn, &playBtn }) addAndMakeVisible (b);
+        for (int v = 0; v < 3; ++v) { scopes[v] = std::make_unique<ScopeBox> (main.player(), v); addAndMakeVisible (*scopes[v]); }
+        timeLabel.setFont (font (15.0f, true));
+        timeLabel.setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (timeLabel);
+        help.setText (toTracker ? T ("Wähle bis zu drei Spuren für die drei Tracker-Stimmen (Stimme 1 ist die tiefste, 3 die höchste). Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.")
+                                : T ("Wähle bis zu drei Spuren für die drei SID-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar."),
+                      juce::dontSendNotification);
         help.setFont (font (13.0f));
         help.setMinimumHorizontalScale (1.0f);
         addAndMakeVisible (help);
         updateButton();
+        startTimerHz (10);
+        updateTime();
+    }
+
+    ~TrackPickPanel() override
+    {
+        stopTimer();
+        if (anyActive()) main.player().stop();
     }
 
     void paint (juce::Graphics& g) override
@@ -197,24 +222,32 @@ public:
         auto b = box().reduced (18);
         g.setColour (th.text);
         g.setFont (font (20.0f, true));
-        g.drawText (T ("Gezielt konvertieren: %1", tab.item (itemIndex) != nullptr ? tab.item (itemIndex)->name : juce::String()), b.removeFromTop (30), juce::Justification::centredLeft, true);
+        const auto name = tab.item (itemIndex) != nullptr ? tab.item (itemIndex)->name : juce::String();
+        g.drawText (toTracker ? T ("Spuren für den Tracker wählen: %1", name) : T ("Gezielt konvertieren: %1", name), b.removeFromTop (30), juce::Justification::centredLeft, true);
     }
 
     void layout() override
     {
         auto b = box().reduced (18);
         b.removeFromTop (34);
+        auto top = b.removeFromTop (50);
+        playBtn.setBounds (top.removeFromLeft (46)); top.removeFromLeft (4);
+        stopBtn.setBounds (top.removeFromLeft (46)); top.removeFromLeft (10);
+        timeLabel.setBounds (top.removeFromLeft (120)); top.removeFromLeft (10);
+        const int sw = (top.getWidth() - 12) / 3;
+        for (int v = 0; v < 3; ++v) { scopes[v]->setBounds (top.removeFromLeft (sw)); top.removeFromLeft (6); }
+        b.removeFromTop (6);
         help.setBounds (b.removeFromTop (40));
         auto bottom = b.removeFromBottom (34);
-        convertBtn.setBounds (bottom.removeFromRight (150)); bottom.removeFromRight (8);
-        cancelBtn.setBounds (bottom.removeFromRight (110)); bottom.removeFromRight (8);
-        stopBtn.setBounds (bottom.removeFromLeft (190));
+        convertBtn.setBounds (bottom.removeFromRight (190)); bottom.removeFromRight (8);
+        cancelBtn.setBounds (bottom.removeFromRight (110));
         b.removeFromBottom (8);
         list.setBounds (b);
     }
 
     // ---- list rows
     int getNumRows() override { return (int) tracks.size(); }
+    int roleWidth() const { return toTracker ? 0 : 146; }
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool) override
     {
         const auto& th = theme();
@@ -223,9 +256,25 @@ public:
         if (row < 0 || row >= (int) tracks.size()) return;
         const int v = voiceOf[(size_t) row];
         if (v > 0) { g.setColour (voiceColour (v - 1).withAlpha (0.22f)); g.fillRect (0, 0, w, h); }
+        const int mapX = w - roleWidth() - 116 - kMiniW - 8;
         g.setColour (th.text);
         g.setFont (font (13.0f));
-        g.drawText (tracks[(size_t) row].label, 50, 0, w - 50 - 330, h, juce::Justification::centredLeft, true);
+        g.drawText (tracks[(size_t) row].label, 50, 0, mapX - 56, h, juce::Justification::centredLeft, true);
+        // the notes of the track over the whole length of the piece; a line follows the playback
+        const juce::Rectangle<int> map (mapX, (h - kMiniH) / 2, kMiniW, kMiniH);
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.fillRect (map);
+        if ((size_t) row < minis.size() && minis[(size_t) row].isValid())
+        {
+            g.setColour (v > 0 ? voiceColour (v - 1) : th.dim.interpolatedWith (th.text, 0.55f));
+            g.drawImageAt (minis[(size_t) row], map.getX(), map.getY(), true);
+        }
+        if (active[(size_t) row] != 0 && total > 0)
+        {
+            const double at = main.player().getMidiElapsedSeconds();
+            g.setColour (juce::Colour (0xff2f9e44));
+            g.fillRect (map.getX() + (int) std::lround (juce::jlimit (0.0, 1.0, at / total) * (kMiniW - 1)), map.getY(), 2, kMiniH);
+        }
     }
 
     juce::Component* refreshComponentForRow (int row, bool, juce::Component* existing) override
@@ -243,10 +292,12 @@ public:
         {
             addAndMakeVisible (play); addAndMakeVisible (voice); addAndMakeVisible (role);
             play.setButtonText (juce::String::fromUTF8 ("▶"));
+            play.setTooltip (T ("Diese Spur ein- oder ausschalten (hörbar = grün); mehrere Spuren gleichzeitig sind möglich"));
             voice.addItem (juce::String::fromUTF8 ("—"), 1);
             for (int i = 1; i <= 3; ++i) voice.addItem (T ("Stimme %1", i), i + 1);
             role.addItem (T ("Automatisch"), 1); role.addItem ("Lead", 2); role.addItem ("Bass", 3); role.addItem ("Pad", 4); role.addItem (T ("Schlagzeug"), 5);
-            play.onClick = [this] { panel.main.player().previewMidiTrack (panel.tab.item (panel.itemIndex)->file, panel.tracks[(size_t) row].trackIndex, nullptr, panel.tracks[(size_t) row].channelFilter); };
+            role.setVisible (! p.toTracker);
+            play.onClick = [this] { panel.toggleTrack (row); };
             voice.onChange = [this]
             {
                 const int v = voice.getSelectedId() - 1;
@@ -263,12 +314,23 @@ public:
             row = r;
             voice.setSelectedId (panel.voiceOf[(size_t) r] + 1, juce::dontSendNotification);
             role.setSelectedId (panel.roleOf[(size_t) r] + 1, juce::dontSendNotification);
+            if (panel.active[(size_t) r] != 0)      // listened to: the key is green
+            {
+                play.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
+                play.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            }
+            else
+            {
+                play.removeColour (juce::TextButton::buttonColourId);
+                play.removeColour (juce::TextButton::textColourOffId);
+            }
+            play.repaint();
         }
         void resized() override
         {
             auto r = getLocalBounds().reduced (2, 3);
             play.setBounds (r.removeFromLeft (38)); r.removeFromLeft (4);
-            role.setBounds (r.removeFromRight (140)); r.removeFromRight (6);
+            if (! panel.toTracker) { role.setBounds (r.removeFromRight (140)); r.removeFromRight (6); }
             voice.setBounds (r.removeFromRight (110));
         }
         TrackPickPanel& panel;
@@ -276,6 +338,77 @@ public:
         juce::TextButton play;
         juce::ComboBox voice, role;
     };
+
+    // ---- preview: tracks are switched on and off one by one; they sound together
+    bool anyActive() const { for (auto a : active) if (a != 0) return true; return false; }
+
+    void applyPreview (bool wasAny)
+    {
+        std::vector<AudioPlayerEngine::PreviewTrack> sel;
+        int rank = 0;
+        for (size_t i = 0; i < tracks.size(); ++i)
+            if (active[i] != 0)
+            {
+                const int slot = voiceOf[i] > 0 ? voiceOf[i] - 1 : rank % 3;
+                ++rank;
+                sel.push_back ({ tracks[i].trackIndex, tracks[i].channelFilter, slot });
+            }
+        if (sel.empty()) { main.player().stop(); return; }
+        if (! wasAny) { tab.stopPreview(); main.sidTab().stopPlayback(); }
+        if (! main.player().setPreviewTracks (tab.item (itemIndex)->file, sel))
+        {
+            std::fill (active.begin(), active.end(), (char) 0);
+            main.setStatus (T ("Die Spur lässt sich nicht vorhören"));
+        }
+    }
+
+    void toggleTrack (int row)
+    {
+        const bool was = anyActive();
+        active[(size_t) row] = active[(size_t) row] != 0 ? 0 : 1;
+        applyPreview (was && main.player().isPlaying());
+        list.updateContent();
+        list.repaint();
+    }
+
+    void playAssigned()
+    {
+        const bool was = anyActive();
+        bool any = false;
+        for (size_t i = 0; i < tracks.size(); ++i) { active[i] = voiceOf[i] > 0 ? 1 : 0; any = any || voiceOf[i] > 0; }
+        if (! any) std::fill (active.begin(), active.end(), (char) 1);
+        main.player().stop();                                // from the beginning
+        applyPreview (false);
+        (void) was;
+        list.updateContent();
+        list.repaint();
+    }
+
+    void stopAll()
+    {
+        std::fill (active.begin(), active.end(), (char) 0);
+        main.player().stop();
+        list.updateContent();
+        list.repaint();
+        updateTime();
+    }
+
+    void updateTime()
+    {
+        const bool playing = anyActive() && main.player().isPlaying();
+        timeLabel.setText (formatTime (playing ? main.player().getMidiElapsedSeconds() : 0.0) + " / " + formatTime (total), juce::dontSendNotification);
+    }
+
+    void timerCallback() override
+    {
+        if (anyActive() && ! main.player().isPlaying())      // the music is over
+        {
+            std::fill (active.begin(), active.end(), (char) 0);
+            list.updateContent();
+        }
+        updateTime();
+        if (anyActive()) list.repaint();
+    }
 
     void updateButton()
     {
@@ -289,19 +422,75 @@ public:
         std::array<int, 3> trackIdx { -1, -1, -1 }, roles { 0, 0, 0 };
         for (size_t i = 0; i < tracks.size(); ++i)
             if (voiceOf[i] > 0) { trackIdx[(size_t) voiceOf[i] - 1] = tracks[i].partId(); roles[(size_t) voiceOf[i] - 1] = roleOf[i]; }
-        main.player().stop();
-        tab.convertTracks (itemIndex, trackIdx, roles, false);
+        stopAll();
+        if (toTracker) tab.convertToTracker (itemIndex, trackIdx);
+        else tab.convertTracks (itemIndex, trackIdx, roles, false);
         closeLater();
     }
 
 private:
+    // a small picture of the notes of every track: time to the right over the whole piece, pitch upwards
+    void buildMinis()
+    {
+        minis.assign (tracks.size(), juce::Image());
+        const auto* item = tab.item (itemIndex);
+        if (item == nullptr) return;
+        juce::FileInputStream in (item->file);
+        juce::MidiFile mf;
+        if (! in.openedOk() || ! mf.readFrom (in)) return;
+        mf.convertTimestampTicksToSeconds();
+        struct N { double a, b; int p; };
+        std::vector<std::vector<N>> notes (tracks.size());
+        double end = 0.0;
+        for (size_t i = 0; i < tracks.size(); ++i)
+        {
+            const int ti = tracks[i].trackIndex, ch = tracks[i].channelFilter;
+            if (ti < 0 || ti >= mf.getNumTracks()) continue;
+            juce::MidiMessageSequence seq (*mf.getTrack (ti));
+            seq.updateMatchedPairs();
+            for (int k = 0; k < seq.getNumEvents(); ++k)
+            {
+                auto* ev = seq.getEventPointer (k);
+                const auto& m = ev->message;
+                if (! m.isNoteOn() || (ch > 0 && m.getChannel() != ch)) continue;
+                const double a = m.getTimeStamp(), b = ev->noteOffObject != nullptr ? ev->noteOffObject->message.getTimeStamp() : a + 0.25;
+                notes[i].push_back ({ a, b, m.getNoteNumber() });
+                end = std::max (end, b);
+            }
+        }
+        total = std::max (end, item->seconds);
+        if (total <= 0.0) total = 1.0;
+        for (size_t i = 0; i < tracks.size(); ++i)
+        {
+            if (notes[i].empty()) continue;
+            int lo = 127, hi = 0;
+            for (auto& n : notes[i]) { lo = std::min (lo, n.p); hi = std::max (hi, n.p); }
+            if (hi - lo < 12) { const int mid = (hi + lo) / 2; lo = mid - 6; hi = mid + 6; }
+            juce::Image img (juce::Image::SingleChannel, kMiniW, kMiniH, true);
+            juce::Graphics g (img);
+            g.setColour (juce::Colours::white);
+            for (auto& n : notes[i])
+            {
+                const float x = (float) (n.a / total * kMiniW), w = std::max (1.2f, (float) ((n.b - n.a) / total * kMiniW));
+                const float y = (float) (kMiniH - 3) - (float) (n.p - lo) / (float) (hi - lo) * (float) (kMiniH - 5);
+                g.fillRect (x, y, w, 2.0f);
+            }
+            minis[i] = img;
+        }
+    }
+
     MidiTab& tab;
     int itemIndex;
     std::vector<Track> tracks;
+    bool toTracker = false;
     std::vector<int> voiceOf, roleOf;
+    std::vector<char> active;
+    std::vector<juce::Image> minis;
+    double total = 1.0;
     juce::ListBox list;
-    juce::TextButton convertBtn, cancelBtn, stopBtn;
-    juce::Label help;
+    juce::TextButton convertBtn, cancelBtn, stopBtn, playBtn;
+    juce::Label help, timeLabel;
+    std::unique_ptr<ScopeBox> scopes[3];
 };
 
 // ================================================================================================ MidiTab
@@ -692,12 +881,6 @@ void MidiTab::convert (int idx, Depth depth)
     if (m == nullptr || ! m->valid) return;
     main.player().stop();
     playingItem = -1;
-    if (depth == Depth::tracker)
-    {
-        main.openTracker();
-        if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file);
-        return;
-    }
     juce::String log;
     bool round = false;
     std::array<MidiToSidCoreEngine::ChannelSuggestion, 3> sug;
@@ -715,7 +898,7 @@ void MidiTab::convert (int idx, Depth depth)
         if (! m->roundTrip) { main.setStatus (T ("Rundlauf geht nur mit MIDI-Dateien, die SIDiMIDI aus einer SID-Datei erzeugt hat")); return; }
         convertTracks (idx, { 1, 2, 3 }, { 0, 0, 0 }, true);
     }
-    else
+    else    // targeted, or the tracker: the tracks are chosen first
     {
         std::vector<MidiToSidCoreEngine::ChannelSuggestion> all;
         if (! MidiToSidCoreEngine::listAllTracks (m->file, all, log) || all.empty())
@@ -723,8 +906,16 @@ void MidiTab::convert (int idx, Depth depth)
             main.setStatus (T ("Keine Spuren mit Noten gefunden"));
             return;
         }
-        main.showOverlay (std::make_unique<TrackPickPanel> (main, *this, idx, std::move (all), std::array<int, 3> { sug[0].partId(), sug[1].partId(), sug[2].partId() }));
+        main.showOverlay (std::make_unique<TrackPickPanel> (main, *this, idx, std::move (all), std::array<int, 3> { sug[0].partId(), sug[1].partId(), sug[2].partId() }, depth == Depth::tracker));
     }
+}
+
+void MidiTab::convertToTracker (int idx, const std::array<int, 3>& parts)
+{
+    const auto* m = item (idx);
+    if (m == nullptr) return;
+    main.openTracker();
+    if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file, parts);
 }
 
 void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip)

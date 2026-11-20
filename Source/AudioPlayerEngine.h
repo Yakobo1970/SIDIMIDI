@@ -403,6 +403,91 @@ public:
         return true;
     }
 
+    // Preview of several MIDI tracks at once (track picker): the tracks can be switched on and off while the
+    // playback goes on - the time continues where it is. slot = the oscillator display (0-2) that follows the track.
+    struct PreviewTrack { int trackIndex = 0; int channelFilter = 0; int slot = 0; };
+
+    bool setPreviewTracks(const juce::File& midiFile, const std::vector<PreviewTrack>& tracks)
+    {
+        if (tracks.empty()) { stop(); return true; }
+
+        double elapsed = 0.0;
+        bool continuing = false;
+        {
+            const juce::ScopedLock sl(lock);
+            continuing = isMidiPlaying && previewTrackIndex >= 0;
+            if (continuing) elapsed = (juce::Time::getMillisecondCounterHiRes() - midiPlaybackStartMs) / 1000.0;
+        }
+
+        juce::FileInputStream inStream(midiFile);
+        if (!inStream.openedOk()) return false;
+        juce::MidiFile parsedFile;
+        if (!parsedFile.readFrom(inStream)) return false;
+        parsedFile.convertTimestampTicksToSeconds();
+
+        std::vector<DecodedMidiEvent> newEvents;
+        for (const auto& pt : tracks)
+        {
+            auto* track = (pt.trackIndex >= 0 && pt.trackIndex < parsedFile.getNumTracks()) ? parsedFile.getTrack(pt.trackIndex) : nullptr;
+            if (track == nullptr) continue;
+            for (int i = 0; i < track->getNumEvents(); ++i)
+            {
+                auto* ev = track->getEventPointer(i);
+                if (ev != nullptr && !ev->message.isMetaEvent() && !ev->message.isSysEx()
+                    && (pt.channelFilter == 0 || ev->message.getChannel() == pt.channelFilter))
+                    newEvents.push_back({ ev->message.getTimeStamp(), ev->message, juce::jlimit(0, 2, pt.slot) });
+            }
+        }
+        if (newEvents.empty()) return false;
+        std::stable_sort(newEvents.begin(), newEvents.end(), [](const DecodedMidiEvent& a, const DecodedMidiEvent& b) { return a.timeSeconds < b.timeSeconds; });
+
+        if (!continuing) stop();
+        if (midiOutputDevice == nullptr)
+        {
+            auto devices = juce::MidiOutput::getAvailableDevices();
+            if (!devices.isEmpty())
+                midiOutputDevice = juce::MidiOutput::openDevice(devices[0].identifier);
+        }
+        if (midiOutputDevice == nullptr) return false;
+
+        {
+            const juce::ScopedLock sl(lock);
+            if (continuing)       // notes that sound now stop; program changes and controllers up to now are sent again so that a new track has its sound
+                for (int ch = 1; ch <= 16; ++ch)
+                    midiOutputDevice->sendMessageNow(juce::MidiMessage::allNotesOff(ch));
+            size_t idx = 0;
+            while (idx < newEvents.size() && newEvents[idx].timeSeconds <= elapsed)
+            {
+                const auto& m = newEvents[idx].message;
+                if (!m.isNoteOnOrOff()) midiOutputDevice->sendMessageNow(m);
+                ++idx;
+            }
+            midiEvents = std::move(newEvents);
+            midiEventIndex = idx;
+            isMultiResSidMidi = false;
+            currentTierIndex = 0;
+            previewTrackIndex = tracks.front().trackIndex;
+            if (!continuing)
+                for (int v = 0; v < 3; ++v)
+                {
+                    midiVisualGate[v] = false; midiVisualEnvelope[v] = 0.0f; midiVisualNote[v] = -1;
+                    midiPitchHistory[v].fill(0.0f); midiPitchHistoryPos[v] = 0;
+                }
+            isMidiPlaying = true;
+            isSidPlaying = false;
+            midiPlaybackStartMs = juce::Time::getMillisecondCounterHiRes() - elapsed * 1000.0;
+        }
+        startTimer(5);
+        return true;
+    }
+
+    // seconds into the running MIDI playback (0 when nothing plays)
+    double getMidiElapsedSeconds() const
+    {
+        const juce::ScopedLock sl(lock);
+        return isMidiPlaying ? (juce::Time::getMillisecondCounterHiRes() - midiPlaybackStartMs) / 1000.0 : 0.0;
+    }
+
     //==============================================================================
     // Anzahl/Kanal-Layout der Auflösungsstufen einer per convertSidToMidiFile() erzeugten
     // Mehrstufen-MIDI-Datei. Bewusst dieselben Konstanten wie im Erzeuger (kMidiTierChannelBase
@@ -653,6 +738,7 @@ private:
     {
         double timeSeconds = 0.0;
         juce::MidiMessage message;
+        int slot = 0;                  // which of the three displays shows the event (track preview)
     };
 
     // Applies a register write of the trace. A gate that goes 0 -> 1 restarts the envelope even when the
@@ -765,7 +851,7 @@ private:
             bool passThrough = previewTrackIndex >= 0
                 ? true
                 : (!isMultiResSidMidi || (channel >= activeChannelBase && channel < activeChannelBase + 3));
-            int v = previewTrackIndex >= 0 ? 0 : (channel - activeChannelBase);
+            int v = previewTrackIndex >= 0 ? midiEvents[midiEventIndex].slot : (channel - activeChannelBase);
 
             if (passThrough)
             {
