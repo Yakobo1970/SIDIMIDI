@@ -117,6 +117,12 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     trackerBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
     trackerBtn.onClick = [this] { main.openTracker(); };
     addAndMakeVisible (repeatBtn);
+    addAndMakeVisible (prevTune);
+    addAndMakeVisible (nextTune);
+    prevTune.setButtonText (juce::String::fromUTF8 ("▲"));
+    nextTune.setButtonText (juce::String::fromUTF8 ("▼"));
+    prevTune.onClick = [this] { stepTune (-1); };
+    nextTune.onClick = [this] { stepTune (1); };
     addAndMakeVisible (prevSong);
     addAndMakeVisible (nextSong);
     prevSong.onClick = [this] { stepSong (-1); };
@@ -261,6 +267,8 @@ void SidTab::applyLanguage()
     ratingBtn.setTooltip (T ("Nur Tunes ab einer Mindestbewertung zeigen"));
     onlyFav.setTooltip (T ("Nur Favoriten zeigen"));
     repeatBtn.setTooltip (T ("Diesen Song wiederholen. Ohne Wiederholen folgen erst die weiteren Songs des Tunes, dann der nächste Tune der Liste – am Listenende wieder von vorn"));
+    prevTune.setTooltip (T ("Vorheriger Tune der Liste (Alt + ←)"));
+    nextTune.setTooltip (T ("Nächster Tune der Liste (Alt + →)"));
     prevSong.setTooltip (T ("Vorheriger Song (Subtune) dieses Tunes"));
     nextSong.setTooltip (T ("Nächster Song (Subtune) dieses Tunes"));
     position.setTooltip (T ("Position im Tune (Klick oder Ziehen springt)"));
@@ -295,6 +303,9 @@ void SidTab::updateButtons()
         const bool back = e != nullptr && song > 1, ahead = e != nullptr && song < e->songs;
         if (prevSong.isEnabled() != back) { prevSong.setEnabled (back); prevSong.repaint(); }
         if (nextSong.isEnabled() != ahead) { nextSong.setEnabled (ahead); nextSong.repaint(); }
+        const int row = e != nullptr ? list.rowOf (e->id) : -1;
+        prevTune.setEnabled (row > 0);
+        nextTune.setEnabled (list.numRows() > 0 && row < list.numRows() - 1);
     }
 }
 
@@ -358,6 +369,8 @@ void SidTab::resized()
     playBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
     stopBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
     repeatBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (10);
+    prevTune.setBounds (gh.removeFromLeft (34)); gh.removeFromLeft (4);
+    nextTune.setBounds (gh.removeFromLeft (34)); gh.removeFromLeft (10);
     position.setBounds (gh.removeFromLeft (juce::jlimit (120, 420, gh.getWidth())));
     infoWidth = juce::jlimit (260, 520, bottom.getWidth() * 3 / 10);
     auto infoArea = bottom.removeFromRight (infoWidth);
@@ -400,6 +413,23 @@ void SidTab::onSelectionChanged (Entry* e)
 }
 
 int SidTab::chosenSong() const { return std::max (1, songBox.getSelectedId()); }
+
+void SidTab::stepTune (int delta)
+{
+    const int rows = list.numRows();
+    auto* cur = selected();
+    int row = cur != nullptr ? list.rowOf (cur->id) : -1;
+    if (rows == 0) return;
+    for (int r = row + delta; r >= 0 && r < rows; r += delta)
+    {
+        auto* e = list.rowEntry (r);
+        if (e == nullptr || e->has (fMissing) || e->has (fError)) continue;
+        const bool playingNow = playingId != 0;       // something is playing (or paused): the new tune starts at once
+        list.selectRow (r);
+        if (playingNow) play (e, 0);
+        return;
+    }
+}
 
 void SidTab::stepSong (int delta)
 {

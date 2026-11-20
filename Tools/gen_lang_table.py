@@ -498,6 +498,8 @@ ROWS = [
  "Répéter ce morceau. Sans répétition, les autres morceaux du fichier suivent d'abord, puis le fichier suivant de la liste – à la fin de la liste, on recommence en haut"),
 ("Vorheriger Song (Subtune) dieses Tunes", "Previous song (sub-tune) of this tune", "Morceau (sous-morceau) précédent de ce fichier"),
 ("Nächster Song (Subtune) dieses Tunes", "Next song (sub-tune) of this tune", "Morceau (sous-morceau) suivant de ce fichier"),
+("Vorheriger Tune der Liste (Alt + ←)", "Previous tune in the list (Alt + ←)", "Fichier précédent de la liste (Alt + ←)"),
+("Nächster Tune der Liste (Alt + →)", "Next tune in the list (Alt + →)", "Fichier suivant de la liste (Alt + →)"),
 ]
 
 def esc(s):

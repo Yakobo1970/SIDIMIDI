@@ -76,6 +76,7 @@ public:
     void stopPlayback();
     bool isPlaying() const;
     void playNext (int delta, bool wrap = false);
+    void stepTune (int delta);          // previous / next tune of the list (plays it when something is playing); repeat stays as set
     void stepSong (int delta);          // previous / next song (sub-tune) of the selected tune
 
     // folders and scanning
@@ -108,6 +109,7 @@ private:
     juce::TextButton onlyFav, trackerBtn;     // only the heart (favourites) and the green tracker button
     RepeatButton repeatBtn;                  // repeat the current song
     SkipButton prevSong { false }, nextSong { true };
+    juce::TextButton prevTune, nextTune;     // one whole tune up / down the list
     juce::TextEditor search, info;
     juce::ComboBox songBox;
     juce::Label emptyHint, songLabel;

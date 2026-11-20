@@ -507,6 +507,8 @@ const Row kRows[] = {
     { "Diesen Song wiederholen. Ohne Wiederholen folgen erst die weiteren Songs des Tunes, dann der nächste Tune der Liste – am Listenende wieder von vorn", "Repeat this song. Without repeat the other songs of the tune follow first, then the next tune in the list – at the end of the list it starts again from the top", "Répéter ce morceau. Sans répétition, les autres morceaux du fichier suivent d'abord, puis le fichier suivant de la liste – à la fin de la liste, on recommence en haut" },
     { "Vorheriger Song (Subtune) dieses Tunes", "Previous song (sub-tune) of this tune", "Morceau (sous-morceau) précédent de ce fichier" },
     { "Nächster Song (Subtune) dieses Tunes", "Next song (sub-tune) of this tune", "Morceau (sous-morceau) suivant de ce fichier" },
+    { "Vorheriger Tune der Liste (Alt + ←)", "Previous tune in the list (Alt + ←)", "Fichier précédent de la liste (Alt + ←)" },
+    { "Nächster Tune der Liste (Alt + →)", "Next tune in the list (Alt + →)", "Fichier suivant de la liste (Alt + →)" },
     // ---- table end
 };
 
