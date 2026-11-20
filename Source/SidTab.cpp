@@ -565,11 +565,11 @@ void SidTab::startPlayback (juce::uint32 frame)
 
 void SidTab::applyPlayRange()
 {
+    // The tune plays to the end of the calculated trace (HVSC song length + 2 s: the lengths of the HVSC often cut the last seconds
+    // of the music). With repeat it starts again at once, inside the audio thread, without a pause.
     auto& pl = main.player();
     if (playingId == 0 || ! pl.hasSidTrace()) return;
-    const auto* e = arch.byId (playingId);
-    const double len = e != nullptr ? e->lengthOf (playingSong > 0 ? playingSong : e->startSong) : 0.0;
-    pl.setSidPlayRange (len > 0 ? (juce::uint32) std::lround (len * pl.getFramesPerSecond()) : 0u, repeatBtn.getToggleState());
+    pl.setSidPlayRange (0, repeatBtn.getToggleState());
 }
 
 void SidTab::togglePlay()
