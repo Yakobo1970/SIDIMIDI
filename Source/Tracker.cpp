@@ -269,6 +269,8 @@ public:
     bool dirty = false;
     int octave = 4;
     std::array<bool, 3> muted { { false, false, false } };
+    std::array<bool, 3> locked { { false, false, false } };         // an OSC that cannot be edited (it is darkened)
+    void toggleLock (int v);
 
     void edit (const std::function<void (NpTune&)>& fn, const juce::String& coalesceKey = {});
     void undo();
@@ -290,6 +292,7 @@ public:
     void saveInstrumentDialog (int row);
     void loadPreset (int row, const InstrumentPreset& p);
     void kbInstrumentForTest (int row) { kbInstr = row; }
+    void lockForTest (int v) { locked[(size_t) v] = true; repaint(); }
     void showPianoForTest() { pianoBtn.setToggleState (true, juce::dontSendNotification); applyPianoVisibility(); }
     void holdKeyForTest (int note) { piano.setHeld (note, true); }
     // copied rows: up to three voices side by side
@@ -423,11 +426,19 @@ public:
         repaint();
     }
 
+    bool locked (int v) const { return panel.locked[(size_t) v]; }
+    bool denyLocked (int v) const
+    {
+        if (! locked (v)) return false;
+        panel.status (T ("OSC%1 ist gesperrt – das Symbol neben dem Namen gibt sie wieder frei", v + 1));
+        return true;
+    }
+    void cancelEditing() { cancelTyping(); repaint(); }
     // ---- keyboard: the note goes to the cursor row
     bool enterNote (int note, bool advance)
     {
         const auto* d = current();
-        if (d == nullptr || d->mark || d->broken) return false;
+        if (d == nullptr || d->mark || d->broken || denyLocked (cv)) return false;
         cf = 2;
         cancelTyping();
         if (panel.kbInstr >= 0) recordNote (cv, cr, note, panel.kbInstr, true);        // the keyboard has its own instrument
@@ -438,7 +449,7 @@ public:
     // recording: the note goes to the given voice and row (the row that plays now); an empty instrument cell gets the instrument of the cursor
     bool recordNote (int v, int r, int note, int instr, bool force = false)
     {
-        if (v < 0 || v > 2 || r < 0 || r >= (int) disp[(size_t) v].size()) return false;
+        if (v < 0 || v > 2 || r < 0 || r >= (int) disp[(size_t) v].size() || denyLocked (v)) return false;
         const auto& d = disp[(size_t) v][(size_t) r];
         if (d.mark || d.broken) return false;
         const int seq = panel.tune.trackList (v)[(size_t) d.entry].seq, ri = d.rowIn;
@@ -483,7 +494,7 @@ public:
         sv0 = juce::jlimit (0, 2, std::min (av, bv)); sv1 = juce::jlimit (0, 2, std::max (av, bv));
         sr0 = juce::jlimit (0, last, std::min (ar, br)); sr1 = juce::jlimit (0, last, std::max (ar, br));
         selActive = true;
-        panel.status (T ("%1 Zeilen × %2 Stimmen markiert – Strg + C kopiert, F1 spielt nur diesen Bereich", sr1 - sr0 + 1, sv1 - sv0 + 1));
+        panel.status (T ("%1 Zeilen × %2 OSC markiert – Strg + C kopiert, F1 spielt nur diesen Bereich", sr1 - sr0 + 1, sv1 - sv0 + 1));
         repaint();
     }
     // a copy of the tune that holds only the marked rows (other voices silent), looping on its own - for playing the area
@@ -546,6 +557,7 @@ public:
         for (int j = 0; j < c.voices && cv + j <= 2; ++j)
         {
             const int v = cv + j;
+            if (locked (v)) continue;
             const auto list = panel.tune.trackList (v);
             for (int i = 0; i < c.rows; ++i)
             {
@@ -573,6 +585,7 @@ public:
         int n = 0;
         for (int v = v0; v <= v1; ++v)
         {
+            if (locked (v)) continue;
             const auto list = panel.tune.trackList (v);
             for (int r = r0; r <= r1 && r < (int) disp[(size_t) v].size(); ++r)
             {
@@ -599,6 +612,7 @@ public:
         std::map<int, std::vector<NpRow>> changed;
         for (int v = sv0; v <= sv1; ++v)
         {
+            if (locked (v)) continue;
             const auto list = panel.tune.trackList (v);
             for (int r = sr0; r <= sr1 && r < (int) disp[(size_t) v].size(); ++r)
             {
@@ -661,7 +675,26 @@ public:
             const int x = voiceX (v);
             g.setColour (voiceColour (v, light).withAlpha (panel.muted[(size_t) v] ? 0.35f : 1.0f));
             g.setFont (font (13.0f, true));
-            g.drawText (T ("Stimme %1", v + 1), x, 0, 72, headH, juce::Justification::centredLeft, false);
+            g.drawText ("OSC" + juce::String (v + 1), x, 0, 52, headH, juce::Justification::centredLeft, false);
+            // a keyboard: click locks the OSC against editing (darkened, with a padlock)
+            {
+                const bool L = panel.locked[(size_t) v];
+                const auto r = lockRect (v).toFloat();
+                const float kx = r.getX() + 2.0f, ky = r.getCentreY() - 5.0f;
+                g.setColour (L ? th.dim.withAlpha (0.85f) : voiceColour (v, light));
+                g.drawRect (kx, ky, 16.0f, 10.0f, 1.0f);
+                for (int i = 1; i <= 3; ++i) g.fillRect (kx + 4.0f * (float) i, ky + 4.0f, 1.0f, 6.0f);
+                for (int i = 1; i <= 3; ++i) g.fillRect (kx + 4.0f * (float) i - 1.5f, ky, 3.0f, 6.0f);
+                if (L)
+                {
+                    g.setColour (juce::Colour (0xffe0453b));
+                    const float lx = kx + 17.0f, ly = r.getCentreY() - 1.0f;
+                    g.fillRect (lx, ly, 8.0f, 6.0f);
+                    juce::Path sh;
+                    sh.startNewSubPath (lx + 1.5f, ly); sh.lineTo (lx + 1.5f, ly - 3.0f); sh.lineTo (lx + 6.5f, ly - 3.0f); sh.lineTo (lx + 6.5f, ly);
+                    g.strokePath (sh, juce::PathStrokeType (1.4f));
+                }
+            }
             // loudspeaker: click mutes the voice
             {
                 const bool m = panel.muted[(size_t) v];
@@ -735,9 +768,12 @@ public:
                 g.drawRect (fx - 2, y, fw + 5, rowH, 2);
             }
         }
+        for (int v = 0; v < 3; ++v)
+            if (panel.locked[(size_t) v]) { g.setColour (juce::Colours::black.withAlpha (0.42f)); g.fillRect (voiceX (v) - 4, headH, voiceW() - 4, getHeight() - headH); }
     }
 
-    juce::Rectangle<int> muteRect (int v) const { return { voiceX (v) + 72, 3, 26, headH - 6 }; }
+    juce::Rectangle<int> muteRect (int v) const { return { voiceX (v) + 52, 3, 26, headH - 6 }; }
+    juce::Rectangle<int> lockRect (int v) const { return { voiceX (v) + 80, 3, 30, headH - 6 }; }
 
     void updateCursor()
     {
@@ -752,7 +788,11 @@ public:
         grabKeyboardFocus();
         if (e.y < headH)
         {
-            for (int v = 0; v < 3; ++v) if (muteRect (v).contains (e.getPosition())) panel.toggleMute (v);
+            for (int v = 0; v < 3; ++v)
+            {
+                if (muteRect (v).contains (e.getPosition())) panel.toggleMute (v);
+                else if (lockRect (v).contains (e.getPosition())) panel.toggleLock (v);
+            }
             return;
         }
         const int r = first + (e.y - headH) / rowH;
@@ -779,7 +819,7 @@ public:
         clampCursor();
         if (e.mods.isPopupMenu()) { showMenu (e.getScreenPosition()); repaint(); return; }
         // a cell can be changed by pulling the mouse: up / down fast, left / right fine
-        if (const auto* d = current(); d != nullptr && ! d->broken && ! d->mark)
+        if (const auto* d = current(); d != nullptr && ! d->broken && ! d->mark && ! locked (cv))
         {
             if (cf == 2) { dragging = true; dragStartVal = d->row.note == 0x7e ? 0 : d->row.note; }
             else if (cf == 1)
@@ -1134,7 +1174,7 @@ void PatternView::move (int dv, int dr)
 void PatternView::setNote (int note, const juce::String& key)
 {
     const auto* d = current();
-    if (d == nullptr || d->mark || d->broken) return;
+    if (d == nullptr || d->mark || d->broken || denyLocked (cv)) return;
     const int seq = panel.tune.trackList (cv)[(size_t) d->entry].seq, ri = d->rowIn;
     panel.edit ([seq, ri, note] (NpTune& t)
     {
@@ -1146,7 +1186,7 @@ void PatternView::setNote (int note, const juce::String& key)
 void PatternView::setCommand (int cmd, const juce::String& key)
 {
     const auto* d = current();
-    if (d == nullptr || d->mark || d->broken) return;
+    if (d == nullptr || d->mark || d->broken || denyLocked (cv)) return;
     const int seq = panel.tune.trackList (cv)[(size_t) d->entry].seq, ri = d->rowIn;
     panel.edit ([seq, ri, cmd] (NpTune& t)
     {
@@ -1158,7 +1198,7 @@ void PatternView::setCommand (int cmd, const juce::String& key)
 void PatternView::commitTrack (bool partialOk)
 {
     const auto* d = current();
-    if (d == nullptr || ! (d->mark || d->rowIn == 0) || trackBuf.isEmpty() || (! partialOk && trackBuf.length() < 4)) { cancelTyping(); return; }
+    if (d == nullptr || locked (cv) || ! (d->mark || d->rowIn == 0) || trackBuf.isEmpty() || (! partialOk && trackBuf.length() < 4)) { cancelTyping(); return; }
     const auto all = panel.tune.trackAll (cv);
     const auto e = d->entry < (int) all.size() ? all[(size_t) d->entry] : NpTrackEntry { 0xff, 0 };
     const auto s = (trackBuf + (hex2 (e.trans) + hex2 (e.seq)).substring (trackBuf.length()));
@@ -1178,7 +1218,7 @@ void PatternView::commitTrack (bool partialOk)
 void PatternView::insertRow()
 {
     const auto* d = current();
-    if (d == nullptr || d->mark || d->broken) return;
+    if (d == nullptr || d->mark || d->broken || denyLocked (cv)) return;
     const int seq = panel.tune.trackList (cv)[(size_t) d->entry].seq, ri = d->rowIn;
     if ((int) panel.tune.sequence (seq).size() >= NpTune::kMaxRows) { panel.status (T ("Eine Sequenz hat höchstens %1 Zeilen", NpTune::kMaxRows)); return; }
     panel.edit ([seq, ri] (NpTune& t) { auto rows = t.sequence (seq); rows.insert (rows.begin() + ri, NpRow()); t.setSequence (seq, rows); });
@@ -1187,7 +1227,7 @@ void PatternView::insertRow()
 void PatternView::deleteRow()
 {
     const auto* d = current();
-    if (d == nullptr || d->mark || d->broken) return;
+    if (d == nullptr || d->mark || d->broken || denyLocked (cv)) return;
     const int seq = panel.tune.trackList (cv)[(size_t) d->entry].seq, ri = d->rowIn;
     if (panel.tune.sequence (seq).size() <= 1) { panel.status (T ("Eine Sequenz braucht mindestens eine Zeile")); return; }
     panel.edit ([seq, ri] (NpTune& t) { auto rows = t.sequence (seq); rows.erase (rows.begin() + ri); t.setSequence (seq, rows); });
@@ -1196,7 +1236,7 @@ void PatternView::deleteRow()
 void PatternView::insertEntry()
 {
     const auto* d = current();
-    if (d == nullptr) return;
+    if (d == nullptr || denyLocked (cv)) return;
     const int voice = cv, idx = d->entry;
     const auto all = panel.tune.trackAll (voice);
     const auto e = idx < (int) all.size() && ! all[(size_t) idx].isMark() ? all[(size_t) idx] : NpTrackEntry { 0x8c, 0 };
@@ -1210,7 +1250,7 @@ void PatternView::insertEntry()
 void PatternView::deleteEntry()
 {
     const auto* d = current();
-    if (d == nullptr || d->mark) return;
+    if (d == nullptr || d->mark || denyLocked (cv)) return;
     const int voice = cv, idx = d->entry;
     panel.edit ([voice, idx] (NpTune& t) { t.deleteTrackEntry (voice, idx); });
 }
@@ -1218,7 +1258,7 @@ void PatternView::deleteEntry()
 void PatternView::newSequenceForEntry()
 {
     const auto* d = current();
-    if (d == nullptr || d->mark) return;
+    if (d == nullptr || d->mark || denyLocked (cv)) return;
     const int n = panel.tune.firstFreeSequence();
     if (n < 0) { panel.status (T ("Alle Sequenzen sind belegt")); return; }
     const int voice = cv, idx = d->entry;
@@ -1234,7 +1274,7 @@ void PatternView::newSequenceForEntry()
 void PatternView::duplicateSequenceForEntry()
 {
     const auto* d = current();
-    if (d == nullptr || d->mark) return;
+    if (d == nullptr || d->mark || denyLocked (cv)) return;
     const int n = panel.tune.firstFreeSequence();
     if (n < 0) { panel.status (T ("Alle Sequenzen sind belegt")); return; }
     const int voice = cv, idx = d->entry;
@@ -1322,6 +1362,7 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
         return true;
     }
     // ---- typing
+    if (locked (cv) && ch != 0) { denyLocked (cv); return true; }
     if (cf == 2)
     {
         if (ch == ' ') { setNote (0); move (0, 1); return true; }
@@ -1431,14 +1472,14 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     recBtn.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffe0343b));
     recBtn.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffe9a3a6));
     recBtn.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
-    recBtn.setTooltip (T ("Aufnahme: spielt den Tune (oder den markierten Bereich) und schreibt gespielte Tasten der Klaviatur oder des MIDI-Keyboards in die Zeile, die gerade spielt – in die Stimme des Cursors. Mit Wiederholen hörst du das Aufgenommene in der nächsten Runde"));
+    recBtn.setTooltip (T ("Aufnahme: spielt den Tune (oder den markierten Bereich) und schreibt gespielte Tasten der Klaviatur oder des MIDI-Keyboards in die Zeile, die gerade spielt – in den OSC des Cursors. Mit Wiederholen hörst du das Aufgenommene in der nächsten Runde"));
     recBtn.onClick = [this]
     {
         updateRecColour();
         if (! recBtn.getToggleState()) return;
         if (! pianoBtn.getToggleState()) { pianoBtn.setToggleState (true, juce::sendNotification); }
         if (! playing) play();
-        status (T ("Aufnahme läuft: Tasten spielen, die Noten landen in der Stimme %1", pattern->cursorVoice() + 1));
+        status (T ("Aufnahme läuft: Tasten spielen, die Noten landen in OSC%1", pattern->cursorVoice() + 1));
     };
     addAndMakeVisible (metroBtn);
     metroBtn.setButtonText (T ("Metronom"));
@@ -1860,6 +1901,14 @@ void TrackerPanel::applyPlayRange()
     main.player().setSidPlayRange (playEndFrames + (rep ? 0u : 25u), rep);
 }
 
+void TrackerPanel::toggleLock (int v)
+{
+    locked[(size_t) v] = ! locked[(size_t) v];
+    status (locked[(size_t) v] ? T ("OSC%1 ist gesperrt und lässt sich nicht mehr bearbeiten", v + 1) : T ("OSC%1 ist wieder frei zum Bearbeiten", v + 1));
+    repaint();
+    if (pattern != nullptr) pattern->cancelEditing();
+}
+
 void TrackerPanel::toggleMute (int v)
 {
     muted[(size_t) v] = ! muted[(size_t) v];
@@ -2202,6 +2251,7 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
         if (c == '+') { content->pattern->transpose (1); continue; }
         if (c == '&') { content->showPianoForTest(); continue; }
         if (c == '[') { content->kbInstrumentForTest (3); continue; }
+        if (c == ']') { content->lockForTest (1); continue; }
         if (c == '!') { content->recordForTest(); continue; }
         if (c == '?') { content->holdKeyForTest (52); continue; }
         int code = c;

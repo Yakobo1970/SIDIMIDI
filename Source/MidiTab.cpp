@@ -185,7 +185,7 @@ public:
         playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
         playBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
         playBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-        playBtn.setTooltip (T ("Spielt die Spuren, die einer Stimme zugeordnet sind (ohne Zuordnung: alle Spuren)"));
+        playBtn.setTooltip (T ("Spielt die Spuren, die einem OSC zugeordnet sind (ohne Zuordnung: alle Spuren)"));
         stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
         stopBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffd0393a));
         stopBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
@@ -199,8 +199,8 @@ public:
         timeLabel.setFont (font (15.0f, true));
         timeLabel.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (timeLabel);
-        help.setText (toTracker ? T ("Wähle bis zu drei Spuren für die drei Tracker-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.")
-                                : T ("Wähle bis zu drei Spuren für die drei SID-Stimmen (Stimme 1 ist die tiefste, 3 die höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar."),
+        help.setText (toTracker ? T ("Wähle bis zu drei Spuren für die drei Tracker-Oszillatoren (OSC1 ist der tiefste, OSC3 der höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.")
+                                : T ("Wähle bis zu drei Spuren für die drei SID-Oszillatoren (OSC1 ist der tiefste, OSC3 der höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar."),
                       juce::dontSendNotification);
         help.setFont (font (13.0f));
         help.setMinimumHorizontalScale (1.0f);
@@ -303,12 +303,12 @@ public:
             prio.addItem (T ("Priorität %1", 2), 2);
             prio.addItem (T ("Priorität %1", 3), 3);
             prio.setTextWhenNothingSelected (T ("Priorität"));
-            prio.setTooltip (T ("Spielen mehrere Spuren dieselbe Stimme, gewinnt bei gleichzeitigen Noten die Spur mit der höheren Priorität; die anderen füllen nur deren Pausen. Die Klänge der Spuren bleiben unterschiedlich (nur im Tracker)"));
+            prio.setTooltip (T ("Spielen mehrere Spuren denselben OSC, gewinnt bei gleichzeitigen Noten die Spur mit der höheren Priorität; die anderen füllen nur deren Pausen. Die Klänge der Spuren bleiben unterschiedlich (nur im Tracker)"));
             prio.onChange = [this] { panel.prioOf[(size_t) row] = prio.getSelectedId() - 1; };
             play.setButtonText (juce::String::fromUTF8 ("▶"));
             play.setTooltip (T ("Diese Spur ein- oder ausschalten (hörbar = grün); mehrere Spuren gleichzeitig sind möglich"));
             voice.addItem (juce::String::fromUTF8 ("—"), 1);
-            for (int i = 1; i <= 3; ++i) voice.addItem (T ("Stimme %1", i), i + 1);
+            for (int i = 1; i <= 3; ++i) voice.addItem ("OSC" + juce::String (i), i + 1);
             role.addItem (T ("Automatisch"), 1); role.addItem ("Lead", 2); role.addItem ("Bass", 3); role.addItem ("Pad", 4); role.addItem (T ("Schlagzeug"), 5);
             play.onClick = [this] { panel.toggleTrack (row); };
             voice.onChange = [this]
