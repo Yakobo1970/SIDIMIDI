@@ -279,6 +279,7 @@ public:
     void tuneChanged();
     void play();                                    // the whole tune, or only the marked area
     void stop();
+    void stopOrHome();
     void toggleMute (int voice);
     void copySel();
     void pasteSel();
@@ -426,6 +427,15 @@ public:
         repaint();
     }
 
+    // Stop pressed a second time: back to the beginning (the view scrolls to the top and the cursor goes to row 0)
+    void goHome() { cancelTyping(); selActive = false; first = 0; cr = 0; clampCursor(); updateBar(); repaint(); }
+    // a note typed on the computer keyboard: it goes in (with the instrument of the keyboard when one is chosen) and the cursor moves on
+    void typeNote (int note)
+    {
+        if (panel.kbInstr >= 0 && ! locked (cv)) recordNote (cv, cr, note, panel.kbInstr, true);
+        else setNote (note);
+        move (0, 1);
+    }
     bool locked (int v) const { return panel.locked[(size_t) v]; }
     bool denyLocked (int v) const
     {
@@ -1369,8 +1379,7 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
         if (ch == '+') { setNote (0x7e); move (0, 1); return true; }
         if (const int p = pianoKey (ch); p >= 0)
         {
-            setNote (std::min (95, panel.octave * 12 + p));
-            move (0, 1);
+            typeNote (std::min (95, panel.octave * 12 + p));
             return true;
         }
     }
@@ -1442,7 +1451,7 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
         { &sidBtn, "Speichern (.sid)", [this] { exportSid(); }, "Als .sid-Datei speichern (spielbar in jedem SID-Abspielprogramm und im SID-Archiv)" },
         { &midiBtn, "Speichern (.mid)", [this] { exportMidi(); }, "Als MIDI-Datei speichern (über die SID-nach-MIDI-Umwandlung)" },
         { &playBtn, "", [this] { play(); }, "Spielt den ganzen Tune oder den markierten Bereich (F1)" },
-        { &stopBtn, "", [this] { stop(); }, "Stopp (Esc)" },
+        { &stopBtn, "", [this] { stopOrHome(); }, "Stopp (Esc); ein zweiter Klick springt an den Anfang zurück" },
         { &copyBtn, "Kopieren", [this] { copySel(); }, "Den markierten Bereich kopieren (Strg + C); markiert wird mit Umschalt + Maus" },
         { &pasteBtn, "Einfügen", [this] { pasteSel(); }, "An der Cursor-Position einfügen (Strg + V)" },
     };
@@ -1608,6 +1617,7 @@ void TrackerPanel::updateMidiIn()
 void TrackerPanel::pianoKey (int note, bool down)
 {
     piano.setHeld (note, down);
+    if (down && pattern != nullptr && ! pattern->hasKeyboardFocus (true)) pattern->grabKeyboardFocus();     // typing on the computer keyboard goes on in the pattern
     if (down && recording() && playing)             // recording: into the row that plays now, rounded to the nearest row
     {
         const int row = juce::jlimit (playStartRow, playEndRow, playStartRow + (int) std::lround ((double) main.player().getPlayFrame() / (double) playSpeed));
@@ -1907,6 +1917,12 @@ void TrackerPanel::toggleLock (int v)
     status (locked[(size_t) v] ? T ("OSC%1 ist gesperrt und lässt sich nicht mehr bearbeiten", v + 1) : T ("OSC%1 ist wieder frei zum Bearbeiten", v + 1));
     repaint();
     if (pattern != nullptr) pattern->cancelEditing();
+}
+
+void TrackerPanel::stopOrHome()
+{
+    if (playing) stop();
+    else if (pattern != nullptr) { pattern->goHome(); status (T ("Zurück am Anfang")); }
 }
 
 void TrackerPanel::toggleMute (int v)
