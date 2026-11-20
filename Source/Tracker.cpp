@@ -289,6 +289,7 @@ public:
     void applyPlayRange();
     void recordForTest() { recBtn.setToggleState (true, juce::dontSendNotification); updateRecColour(); }
     // ---- instrument pool and the instrument of the keyboard
+    bool jchKeys() const { return keysBtn.getToggleState(); }
     int kbInstr = -1;                               // instrument the keyboard plays and writes (-1: the one at the cursor)
     void toggleKbInstrument (int row);
     void showInstrumentMenu (int row, juce::Point<int> screen);
@@ -337,7 +338,7 @@ private:
     void applyMetronome();
     // ---- keyboard: the mouse or a connected MIDI keyboard plays a note and writes its value at the cursor
     PianoView piano;
-    juce::TextButton pianoBtn, pOctUp, pOctDown;                        // octave up / down beside the keys
+    juce::TextButton pianoBtn, pOctUp, pOctDown, keysBtn;              // keysBtn: the keys Q2W3ER5T6Y7U I9O0P as a piano (the JCH layout) instead of note names                        // octave up / down beside the keys
     juce::ToggleButton advanceBtn;
     juce::ComboBox midiInBox;
     juce::Label midiInLbl;
@@ -767,7 +768,7 @@ public:
                 g.setColour ((row.row.cmd >= 0xa0) ? th.track[3] : th.dim);
                 g.drawText (typing && v == cv && r == cr && cf == 1 ? cmdBuf.paddedRight ('_', 3) : cmdText (row.row.cmd), x + cw * 5, y, cw * 3 + 2, rowH, juce::Justification::centredLeft, false);
                 g.setColour (row.row.note == 0 || row.row.note == 0x7e ? th.dim : voiceColour (v, light).brighter (0.2f));
-                g.drawText (noteText (row.row.note), x + cw * 9, y, cw * 3 + 2, rowH, juce::Justification::centredLeft, false);
+                g.drawText (typing && v == cv && r == cr && cf == 2 && noteBuf.isNotEmpty() ? noteBuf.paddedRight ('_', 3) : noteText (row.row.note), x + cw * 9, y, cw * 3 + 2, rowH, juce::Justification::centredLeft, false);
             }
         }
         // cursor
@@ -922,7 +923,7 @@ private:
     int total = 0, first = 0, playRow = -1;
     int cv = 0, cr = 0, cf = 1;           // cursor: voice, row, field (0 track word, 1 command, 2 note)
     bool typing = false;
-    juce::String cmdBuf, trackBuf;
+    juce::String cmdBuf, trackBuf, noteBuf;
     char cmdMode = 0;
     bool selActive = false, selecting = false;       // the marked area
     int selAV = 0, selAR = 0, sv0 = 0, sv1 = 0, sr0 = 0, sr1 = 0;
@@ -971,7 +972,24 @@ private:
         const auto cur = hex2 (e.trans) + hex2 (e.seq);
         return trackBuf + cur.substring (trackBuf.length());
     }
-    void cancelTyping() { typing = false; cmdBuf = {}; trackBuf = {}; cmdMode = 0; }
+    void cancelTyping() { typing = false; cmdBuf = {}; trackBuf = {}; noteBuf = {}; cmdMode = 0; }
+    // typed note names: letter, # or b, octave digit; Return puts the note in and moves on (arrows put it in and stay)
+    void commitNote (bool advance)
+    {
+        static const int semis[7] = { 9, 11, 0, 2, 4, 5, 7 };          // A B C D E F G
+        if (noteBuf.isEmpty()) { cancelTyping(); return; }
+        int n = semis[juce::jlimit (0, 6, (int) (noteBuf[0] - 'A'))];
+        int octave = panel.octave;
+        for (int i = 1; i < noteBuf.length(); ++i)
+        {
+            const auto c = noteBuf[i];
+            if (c == '#') ++n; else if (c == 'b') --n; else if (c >= '0' && c <= '9') octave = c - '0';
+        }
+        const int note = juce::jlimit (1, 95, octave * 12 + n);
+        cancelTyping();
+        if (advance) typeNote (note);
+        else { if (panel.kbInstr >= 0 && ! locked (cv)) recordNote (cv, cr, note, panel.kbInstr, true); else setNote (note); repaint(); }
+    }
     const DRow* current() const
     {
         const auto& d = disp[(size_t) cv];
@@ -1345,6 +1363,7 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
         if (code == juce::KeyPress::leftKey) { extendSelection (-1, 0); return true; }
         if (code == juce::KeyPress::rightKey) { extendSelection (1, 0); return true; }
     }
+    if (typing && cf == 2 && (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey || code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey || code == juce::KeyPress::tabKey)) commitNote (false);
     if (code == juce::KeyPress::upKey) { if (typing && cf == 0) commitTrack (true); move (0, -1); return true; }
     if (code == juce::KeyPress::downKey) { if (typing && cf == 0) commitTrack (true); move (0, 1); return true; }
     if (code == juce::KeyPress::leftKey) { if (typing && cf == 0) commitTrack (true); move (-1, 0); return true; }
@@ -1357,6 +1376,13 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
     if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey)
     {
         if (selActive) { clearSelectedCells(); return true; }
+        if (typing && cf == 2 && noteBuf.isNotEmpty())
+        {
+            noteBuf = code == juce::KeyPress::backspaceKey ? noteBuf.dropLastCharacters (1) : juce::String();
+            if (noteBuf.isEmpty()) typing = false;
+            repaint();
+            return true;
+        }
         if (cf == 0) { if (typing) { cancelTyping(); repaint(); } else deleteEntry(); }
         else if (cf == 1) setCommand (0x80);
         else setNote (0);
@@ -1370,6 +1396,7 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
     if (code == juce::KeyPress::returnKey)
     {
         if (cf == 0 && typing) { commitTrack (true); move (0, 1); }
+        else if (cf == 2 && typing && noteBuf.isNotEmpty()) commitNote (true);
         else move (0, 1);
         return true;
     }
@@ -1379,10 +1406,34 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
     {
         if (ch == ' ') { setNote (0); move (0, 1); return true; }
         if (ch == '+') { setNote (0x7e); move (0, 1); return true; }
-        if (const int p = pianoKey (ch); p >= 0)
+        if (panel.jchKeys())
         {
-            typeNote (std::min (95, panel.octave * 12 + p));
-            return true;
+            if (const int p = pianoKey (ch); p >= 0)
+            {
+                typeNote (std::min (95, panel.octave * 12 + p));
+                return true;
+            }
+        }
+        else    // note names: C D E F G A B (H = B), # sharp, b flat, a digit sets the octave, Return puts the note in
+        {
+            const auto lc = juce::CharacterFunctions::toLowerCase (ch);
+            const bool bare = noteBuf.length() == 1;
+            if (noteBuf.isNotEmpty() && ch == '#' && bare) { noteBuf << "#"; repaint(); return true; }
+            if (noteBuf.isNotEmpty() && lc == 'b' && bare) { noteBuf << "b"; repaint(); return true; }       // after a letter b is a flat (Bb = B flat); a new B needs Return first
+            if (noteBuf.isNotEmpty() && ch >= '0' && ch <= '9' && noteBuf.length() < 4)
+            {
+                noteBuf = noteBuf.retainCharacters ("ABCDEFG#b");
+                noteBuf << juce::String::charToString (ch);
+                repaint();
+                return true;
+            }
+            if ((lc >= 'a' && lc <= 'h') && ! ctrl)
+            {
+                noteBuf = juce::String::charToString (lc == 'h' ? 'B' : juce::CharacterFunctions::toUpperCase (lc));
+                typing = true;
+                repaint();
+                return true;
+            }
         }
     }
     else if (cf == 1)
@@ -1497,6 +1548,12 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     metroBtn.setClickingTogglesState (true);
     metroBtn.setTooltip (T ("Metronom: ein Klick auf jeden Schlag (alle 4 Zeilen), der erste Schlag eines Takts (16 Zeilen) klingt höher"));
     metroBtn.onClick = [this] { applyMetronome(); };
+    addAndMakeVisible (keysBtn);
+    keysBtn.setButtonText (T ("JCH-Tasten"));
+    keysBtn.setClickingTogglesState (true);
+    keysBtn.setToggleState ((bool) main.archive().settings.getProperty ("trackerKeysJch", false), juce::dontSendNotification);
+    keysBtn.setTooltip (T ("Tastenbelegung für Noten: aus = Notennamen tippen (C D E F G A H, # Kreuz, b Be, Ziffer Oktave, Return setzt). An = die Tasten Q2W3ER5T6Y7U I9O0P als Klaviatur wie im Editor von JCH"));
+    keysBtn.onClick = [this] { main.archive().settings.setProperty ("trackerKeysJch", keysBtn.getToggleState(), nullptr); main.notifySettings(); pattern->cancelEditing(); pattern->grabKeyboardFocus(); };
     addAndMakeVisible (pianoBtn);
     pianoBtn.setButtonText (T ("Klaviatur"));
     pianoBtn.setClickingTogglesState (true);
@@ -2153,7 +2210,8 @@ void TrackerPanel::resized()
     pasteBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (22);
     spdMinus.setBounds (row2.removeFromLeft (28)); spdLabel.setBounds (row2.removeFromLeft (80)); spdPlus.setBounds (row2.removeFromLeft (28)); row2.removeFromLeft (12);
     octMinus.setBounds (row2.removeFromLeft (28)); octLabel.setBounds (row2.removeFromLeft (90)); octPlus.setBounds (row2.removeFromLeft (28)); row2.removeFromLeft (22);
-    pianoBtn.setBounds (row2.removeFromLeft (96));
+    pianoBtn.setBounds (row2.removeFromLeft (96)); row2.removeFromLeft (4);
+    keysBtn.setBounds (row2.removeFromLeft (104));
     r.removeFromTop (4);
     infoLabel.setBounds (r.removeFromTop (22));
     statusLabel.setBounds (r.removeFromBottom (22));

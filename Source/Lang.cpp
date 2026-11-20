@@ -604,6 +604,8 @@ const Row kRows[] = {
     { "Nächstes Preset (bei Schlagzeug: Kit); am Ende kommt die Rolle zurück", "Next preset (drums: kit); at the end the role comes back", "Preset suivant (batterie : kit) ; à la fin, le rôle revient" },
     { "Eine Oktave höher (F8, oder das Mausrad über den Tasten)", "One octave up (F8, or the mouse wheel over the keys)", "Une octave plus haut (F8, ou la molette sur les touches)" },
     { "Eine Oktave tiefer (F7, oder das Mausrad über den Tasten)", "One octave down (F7, or the mouse wheel over the keys)", "Une octave plus bas (F7, ou la molette sur les touches)" },
+    { "JCH-Tasten", "JCH keys", "Touches JCH" },
+    { "Tastenbelegung für Noten: aus = Notennamen tippen (C D E F G A H, # Kreuz, b Be, Ziffer Oktave, Return setzt). An = die Tasten Q2W3ER5T6Y7U I9O0P als Klaviatur wie im Editor von JCH", "Key layout for notes: off = type note names (C D E F G A H, # sharp, b flat, a digit for the octave, Return enters). On = the keys Q2W3ER5T6Y7U I9O0P as a piano, as in JCH’s editor", "Disposition des touches pour les notes : désactivé = taper les noms de notes (C D E F G A H, # dièse, b bémol, un chiffre pour l’octave, Entrée valide). Activé = les touches Q2W3ER5T6Y7U I9O0P comme un piano, comme dans l’éditeur de JCH" },
     // ---- table end
 };
 
