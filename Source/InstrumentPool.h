@@ -3,6 +3,7 @@
 #pragma once
 #include <juce_core/juce_core.h>
 #include <array>
+#include <string>
 #include <vector>
 #include "NpTune.h"
 
@@ -27,6 +28,8 @@ namespace InstrumentPool
 const char* const kCategories[] = { "Leads", "Bässe", "Arpeggios", "Pads", "Kicks", "Snares", "Hi-Hats", "Toms & Becken", "Effekte", "Eigene" };
 constexpr int kNumCategories = 10;
 
+std::string keyOf (const InstrumentPreset& p);                        // "category|name|f" (factory) or "|u" (own)
+bool find (const std::string& key, InstrumentPreset& out);
 bool supported (const NpTune& t);                                     // player variants whose tables have the layout the presets use
 std::vector<InstrumentPreset> factoryPresets();
 std::vector<InstrumentPreset> userPresets();

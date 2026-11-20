@@ -272,6 +272,16 @@ bool applyImpl (NpTune& t, int instrument, const InstrumentPreset& p, juce::Stri
 }
 } // namespace
 
+std::string keyOf (const InstrumentPreset& p) { return (p.category + "|" + p.name + (p.factory ? "|f" : "|u")).toStdString(); }
+
+bool find (const std::string& key, InstrumentPreset& out)
+{
+    const bool factory = key.size() > 2 && key.compare (key.size() - 2, 2, "|f") == 0;
+    for (auto& p : factory ? factoryPresets() : userPresets())
+        if (keyOf (p) == key) { out = p; return true; }
+    return false;
+}
+
 bool supported (const NpTune& t) { const int v = t.playerVersion(); return v == 18 || v == 20; }
 
 std::vector<InstrumentPreset> factoryPresets()

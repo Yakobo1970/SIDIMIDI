@@ -104,9 +104,9 @@ public:
         g.drawFittedText (b.getButtonText(), r.toNearestInt().withTrimmedLeft (4), juce::Justification::centredLeft, 1);
     }
 
-    void drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox&) override
+    void drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box) override
     {
-        g.setColour (th.panel2);
+        g.setColour (box.isColourSpecified (juce::ComboBox::backgroundColourId) ? box.findColour (juce::ComboBox::backgroundColourId) : th.panel2);
         g.fillRoundedRectangle (0, 0, (float) w, (float) h, 5.0f);
         juce::Path p;
         const float cx = (float) w - 12.0f, cy = (float) h * 0.5f;

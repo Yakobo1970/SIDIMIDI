@@ -4,6 +4,7 @@
 #include "AudioPlayerEngine.h"
 #include "MidiToSidCore.h"
 #include "SidInfo.h"
+#include "InstrumentPool.h"
 #include "SidTrace.h"
 
 namespace sm
@@ -172,10 +173,26 @@ public:
         voiceOf.assign (tracks.size(), 0);
         roleOf.assign (tracks.size(), 0);
         prioOf.assign (tracks.size(), 0);
+        presetOf.assign (tracks.size(), -1);
+        if (toTracker)
+        {
+            presets = InstrumentPool::factoryPresets();
+            const auto mine = InstrumentPool::userPresets();
+            presets.insert (presets.end(), mine.begin(), mine.end());
+        }
         active.assign (tracks.size(), 0);
         for (int v = 0; v < 3; ++v)
             for (size_t i = 0; i < tracks.size(); ++i)
                 if (tracks[i].partId() == pre[(size_t) v]) voiceOf[i] = v + 1;
+        if (const char* test = std::getenv ("SIDI_PICK_TEST"))       // test only: "1,1,2,0,1" = the OSC of every track
+        {
+            const auto parts = juce::StringArray::fromTokens (test, ",", "");
+            for (int i = 0; i < parts.size() && i < (int) voiceOf.size(); ++i) voiceOf[(size_t) i] = parts[i].getIntValue();
+            for (size_t i = 0; i < prioOf.size(); ++i) prioOf[i] = (int) i;
+        }
+        if (const char* test = std::getenv ("SIDI_PICK_PRESET"); test != nullptr && ! presets.empty())      // test only: preset index for track 0
+            presetOf[0] = juce::String (test).getIntValue();
+        normalizePrio();
         buildMinis();
         list.setModel (this);
         list.setRowHeight (34);
@@ -249,6 +266,28 @@ public:
     // ---- list rows
     int getNumRows() override { return (int) tracks.size(); }
     int roleWidth() const { return 146 + 106; }
+    int groupSize (int v) const { int n = 0; for (int x : voiceOf) n += x == v && v > 0; return n; }
+    // priorities are ranks inside a voice: 0 .. n-1 without gaps, ties by row
+    void normalizePrio()
+    {
+        for (int v = 0; v <= 3; ++v)
+        {
+            std::vector<size_t> idx;
+            for (size_t i = 0; i < voiceOf.size(); ++i) if (voiceOf[i] == v) idx.push_back (i);
+            std::stable_sort (idx.begin(), idx.end(), [this] (size_t a, size_t b) { return prioOf[a] < prioOf[b]; });
+            for (size_t k = 0; k < idx.size(); ++k) prioOf[idx[k]] = v == 0 ? 0 : (int) k;
+        }
+    }
+    void setRank (size_t row, int want)       // this track takes rank `want`; the others close up around it
+    {
+        std::vector<size_t> idx;
+        for (size_t i = 0; i < voiceOf.size(); ++i) if (i != row && voiceOf[i] == voiceOf[row]) idx.push_back (i);
+        std::stable_sort (idx.begin(), idx.end(), [this] (size_t a, size_t b) { return prioOf[a] < prioOf[b]; });
+        idx.insert (idx.begin() + std::min ((size_t) std::max (want, 0), idx.size()), row);
+        for (size_t k = 0; k < idx.size(); ++k) prioOf[idx[k]] = (int) k;
+        list.updateContent();
+        list.repaint();
+    }
     // does another track play the same voice? Then the priority matters
     bool shared (size_t row) const
     {
@@ -299,12 +338,9 @@ public:
         explicit Row (TrackPickPanel& p) : panel (p)
         {
             addAndMakeVisible (play); addAndMakeVisible (voice); addAndMakeVisible (role); addAndMakeVisible (prio);
-            prio.addItem (T ("Priorität %1", 1) + " " + T ("(höchste)"), 1);
-            prio.addItem (T ("Priorität %1", 2), 2);
-            prio.addItem (T ("Priorität %1", 3), 3);
             prio.setTextWhenNothingSelected (T ("Priorität"));
             prio.setTooltip (T ("Spielen mehrere Spuren denselben OSC, gewinnt bei gleichzeitigen Noten die Spur mit der höheren Priorität; die anderen füllen nur deren Pausen. Die Klänge der Spuren bleiben unterschiedlich (nur im Tracker)"));
-            prio.onChange = [this] { panel.prioOf[(size_t) row] = prio.getSelectedId() - 1; };
+            prio.onChange = [this] { if (prio.getSelectedId() > 0) panel.setRank ((size_t) row, prio.getSelectedId() - 1); };
             play.setButtonText (juce::String::fromUTF8 ("▶"));
             play.setTooltip (T ("Diese Spur ein- oder ausschalten (hörbar = grün); mehrere Spuren gleichzeitig sind möglich"));
             voice.addItem (juce::String::fromUTF8 ("—"), 1);
@@ -315,27 +351,57 @@ public:
             {
                 const int v = voice.getSelectedId() - 1;
                 panel.voiceOf[(size_t) row] = v;
-                if (panel.shared ((size_t) row))      // a new second track on a voice comes after the others
-                {
-                    int worst = -1;
-                    for (size_t i = 0; i < panel.voiceOf.size(); ++i) if (i != (size_t) row && panel.voiceOf[i] == v) worst = std::max (worst, panel.prioOf[i]);
-                    panel.prioOf[(size_t) row] = std::min (2, worst + 1);
-                }
-                else panel.prioOf[(size_t) row] = 0;
+                panel.prioOf[(size_t) row] = 1000;      // a track that joins a voice comes after the others
+                panel.normalizePrio();
                 panel.list.updateContent();
                 panel.list.repaint();
                 panel.updateButton();
             };
-            role.onChange = [this] { panel.roleOf[(size_t) row] = role.getSelectedId() - 1; };
+            if (panel.toTracker && ! panel.presets.empty())      // presets of the instrument pool in place of a role
+            {
+                auto* root = role.getRootMenu();
+                root->addSeparator();
+                juce::PopupMenu all;
+                for (int c = 0; c < InstrumentPool::kNumCategories; ++c)
+                {
+                    juce::PopupMenu sub;
+                    for (size_t i = 0; i < panel.presets.size(); ++i)
+                        if (panel.presets[i].category == juce::String::fromUTF8 (InstrumentPool::kCategories[c]) || (c == InstrumentPool::kNumCategories - 1 && ! panel.presets[i].factory))
+                            sub.addItem (100 + (int) i, panel.presets[i].name);
+                    if (sub.getNumItems() > 0) all.addSubMenu (juce::String::fromUTF8 (InstrumentPool::kCategories[c]), sub);
+                }
+                root->addSubMenu (T ("Preset aus dem Instrumentenpool"), all);
+            }
+            role.onChange = [this]
+            {
+                const int id = role.getSelectedId();
+                if (id >= 100) { panel.presetOf[(size_t) row] = id - 100; panel.roleOf[(size_t) row] = 0; }
+                else if (id > 0) { panel.presetOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = id - 1; }
+            };
         }
         void set (int r)
         {
             row = r;
             voice.setSelectedId (panel.voiceOf[(size_t) r] + 1, juce::dontSendNotification);
-            role.setSelectedId (panel.roleOf[(size_t) r] + 1, juce::dontSendNotification);
+            role.setSelectedId (panel.presetOf[(size_t) r] >= 0 ? 100 + panel.presetOf[(size_t) r] : panel.roleOf[(size_t) r] + 1, juce::dontSendNotification);
             const bool sh = panel.shared ((size_t) r);
+            prio.clear (juce::dontSendNotification);
+            const int n = panel.groupSize (panel.voiceOf[(size_t) r]);
+            for (int k = 1; k <= n && sh; ++k) prio.addItem (T ("Priorität %1", k), k);
             prio.setEnabled (sh);
             prio.setSelectedId (sh ? panel.prioOf[(size_t) r] + 1 : 0, juce::dontSendNotification);
+            if (sh)         // the priority field wears the colour of the OSC it belongs to
+            {
+                prio.setColour (juce::ComboBox::backgroundColourId, voiceColour (panel.voiceOf[(size_t) r] - 1).withMultipliedBrightness (0.55f));
+                prio.setColour (juce::ComboBox::textColourId, juce::Colours::white);
+                prio.setColour (juce::ComboBox::arrowColourId, juce::Colours::white);
+            }
+            else
+            {
+                prio.removeColour (juce::ComboBox::backgroundColourId);
+                prio.removeColour (juce::ComboBox::textColourId);
+                prio.removeColour (juce::ComboBox::arrowColourId);
+            }
             if (panel.active[(size_t) r] != 0)      // listened to: the key is green
             {
                 play.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
@@ -444,7 +510,9 @@ public:
     {
         VoiceSources sources;
         for (size_t i = 0; i < tracks.size(); ++i)
-            if (voiceOf[i] > 0) sources[(size_t) voiceOf[i] - 1].push_back ({ tracks[i].partId(), roleOf[i], shared (i) ? prioOf[i] : 0 });
+            if (voiceOf[i] > 0)
+                sources[(size_t) voiceOf[i] - 1].push_back ({ tracks[i].partId(), roleOf[i], shared (i) ? prioOf[i] : 0,
+                                                              presetOf[i] >= 0 ? InstrumentPool::keyOf (presets[(size_t) presetOf[i]]) : std::string() });
         stopAll();
         if (toTracker) tab.convertToTracker (itemIndex, sources);
         else tab.convertTracks (itemIndex, sources, false);
@@ -507,6 +575,8 @@ private:
     std::vector<Track> tracks;
     bool toTracker = false;
     std::vector<int> voiceOf, roleOf, prioOf;      // prioOf: 0 = highest
+    std::vector<int> presetOf;                      // index into presets, -1 = none (the role decides)
+    std::vector<InstrumentPreset> presets;
     std::vector<char> active;
     std::vector<juce::Image> minis;
     double total = 1.0;

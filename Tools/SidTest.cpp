@@ -367,6 +367,8 @@ int main (int argc, char** argv)
                 for (auto& t : juce::StringArray::fromTokens (voices[v], ",", "")) if (t.isNotEmpty()) vs[(size_t) v].push_back ({ t.getIntValue(), 0, prio++ });
             }
         }
+        if (const char* pn = std::getenv ("SIDI_PRESET"))        // SIDI_PRESET="Säge" gives the first track of OSC1 a factory preset
+            for (auto& fp : InstrumentPool::factoryPresets()) if (fp.name == juce::String::fromUTF8 (pn) && ! vs[0].empty()) vs[0][0].preset = InstrumentPool::keyOf (fp);
         auto r = npImportMidi (juce::File (juce::String::fromUTF8 (argv[3])), tpl.getData(), tpl.getSize(), vs);
         out (r.report);
         if (! r.ok) return 1;

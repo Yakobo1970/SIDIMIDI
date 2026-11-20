@@ -236,7 +236,7 @@ ROWS = [
 ("BASIC-Programm (RSID): braucht einen echten C64 und lässt sich hier nicht darstellen", "BASIC program (RSID): needs a real C64 and cannot be shown here", "Programme BASIC (RSID) : nécessite un vrai C64 et ne peut pas être affiché ici"),
 ("Lautstärke", "Volume", "Volume"),
 ("Verlauf wird berechnet", "Calculating course", "Calcul du déroulement"),
-("Klick auf den Stimmennamen schaltet die Stimme stumm", "Click on the voice name to mute the voice", "Un clic sur le nom de la voix la coupe"),
+("Klick auf den Namen OSC1–3 schaltet den Oszillator stumm", "Click on the name OSC1–3 to mute the oscillator", "Un clic sur le nom OSC1–3 coupe l’oscillateur"),
 # ---- columns
 ("Favorit (Klick)", "Favourite (click)", "Favori (clic)"),
 ("Bewertung 1–5 Sterne (Klick auf einen Stern; erneut klicken nimmt ihn zurück)", "Rating 1–5 stars (click a star; click again to take it back)", "Note de 1 à 5 étoiles (cliquer sur une étoile ; recliquer l'annule)"),
@@ -284,9 +284,9 @@ ROWS = [
 ("Der Tune schreibt nichts in die SID-Register", "The tune writes nothing to the SID registers", "Le morceau n'écrit rien dans les registres SID"),
 # ---- version 2.0 round 2 (transport, save dialogs, tab names)
 ("Verlauf", "Course", "Déroulement"),
-("Miniatur des Ablaufs: die drei Stimmen als Stapellandschaft (wird im Hintergrund für die sichtbaren Zeilen berechnet)",
- "Miniature of the course: the three voices as a stacked landscape (calculated in the background for the rows on screen)",
- "Miniature du déroulement : les trois voix en paysage empilé (calculée en arrière-plan pour les lignes visibles)"),
+("Miniatur des Ablaufs: die drei Oszillatoren als Stapellandschaft (wird im Hintergrund für die sichtbaren Zeilen berechnet)",
+ "Miniature of the course: the three oscillators as a stacked landscape (calculated in the background for the rows on screen)",
+ "Miniature du déroulement : les trois oscillateurs en paysage empilé (calculée en arrière-plan pour les lignes visibles)"),
 ("Position im Tune (Klick oder Ziehen springt)", "Position in the tune (click or drag to jump)", "Position dans le morceau (clic ou glisser pour sauter)"),
 ("Start-Song von %1 Dateien direkt in den SID-Ordner", "Start song of %1 files straight into the SID folder", "Morceau de départ de %1 fichiers directement dans le dossier du SID"),
 ("Start-Song von %1 Dateien in einen Ordner speichern …", "Save the start song of %1 files into a folder …", "Enregistrer le morceau de départ de %1 fichiers dans un dossier …"),
@@ -302,7 +302,7 @@ ROWS = [
 ("Nur Zeichen des Latin-1-Zeichensatzes (kein Euro-Zeichen, keine asiatischen Zeichen)", "Only Latin-1 characters (no euro sign, no Asian characters)", "Seulement des caractères Latin-1 (pas de signe euro, pas de caractères asiatiques)"),
 ("Schreiben nicht möglich (Datei schreibgeschützt oder gesperrt?)", "Cannot write (file write-protected or locked?)", "Écriture impossible (fichier protégé ou verrouillé ?)"),
 ("Neue HVSC-Version verfügbar: #%1 – unter „HVSC-Sammlung aktualisieren …“", "New HVSC version available: #%1 – see “Update HVSC collection …”", "Nouvelle version HVSC disponible : #%1 – voir « Mettre à jour la collection HVSC … »"),
-("Oszillatoren der drei SID-Stimmen (live beim Abspielen)", "Oscillators of the three SID voices (live while playing)", "Oscillateurs des trois voix SID (en direct pendant la lecture)"),
+("Die drei SID-Oszillatoren OSC1–3 (live beim Abspielen)", "The three SID oscillators OSC1–3 (live while playing)", "Les trois oscillateurs SID OSC1–3 (en direct pendant la lecture)"),
 ("HVSC-Sammlung aktualisieren … (neu: #%1)", "Update HVSC collection … (new: #%1)", "Mettre à jour la collection HVSC … (nouveau : #%1)"),
 ("HVSC-Sammlung prüfen und aktualisieren …", "Check and update HVSC collection …", "Vérifier et mettre à jour la collection HVSC …"),
 ("Nichts zum Rückgängigmachen", "Nothing to undo", "Rien à annuler"),
@@ -579,6 +579,8 @@ ROWS = [
 ('OSC%1 ist gesperrt und lässt sich nicht mehr bearbeiten', 'OSC%1 is locked and cannot be edited any more', 'OSC%1 est verrouillé et ne peut plus être modifié'),
 ('OSC%1 ist wieder frei zum Bearbeiten', 'OSC%1 can be edited again', 'OSC%1 peut de nouveau être modifié'),
 ('OSC%1 ist gesperrt – das Symbol neben dem Namen gibt sie wieder frei', 'OSC%1 is locked – the symbol beside its name unlocks it', 'OSC%1 est verrouillé – le symbole à côté du nom le déverrouille'),
+# ---- preset per track
+('Preset aus dem Instrumentenpool', 'Preset from the instrument pool', 'Preset de la banque d’instruments'),
 ]
 
 def esc(s):

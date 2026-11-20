@@ -15,7 +15,7 @@ const ColDef kCols[] = {
     { cReleased, "Veröffentlicht", 150, false, true,  "Jahr und Firma aus dem SID-Kopf" },
     { cSongs,    "Songs",          52,  true,  true,  "Anzahl der Songs (Subtunes)" },
     { cLength,   "Länge",          58,  true,  true,  "Länge des Start-Songs (Songlängen-Datenbank der HVSC)" },
-    { cLandscape, "Verlauf",       170, false, true,  "Miniatur des Ablaufs: die drei Stimmen als Stapellandschaft (wird im Hintergrund für die sichtbaren Zeilen berechnet)" },
+    { cLandscape, "Verlauf",       170, false, true,  "Miniatur des Ablaufs: die drei Oszillatoren als Stapellandschaft (wird im Hintergrund für die sichtbaren Zeilen berechnet)" },
     { cType,     "Typ",            76,  false, true,  "PSID oder RSID mit Versionsnummer" },
     { cSid,      "SID",            74,  false, true,  "SID-Chip-Typ laut Kopf: 6581 oder 8580" },
     { cClock,    "Takt",           68,  false, true,  "PAL oder NTSC laut Kopf" },

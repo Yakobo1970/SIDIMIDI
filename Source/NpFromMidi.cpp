@@ -1,6 +1,8 @@
 #include "NpFromMidi.h"
 #include "MidiToSidCore.h"
 #include "VoiceMix.h"
+#include "InstrumentPool.h"
+#include <memory>
 #include "Lang.h"
 #include <map>
 #include <set>
@@ -23,6 +25,7 @@ struct InVoice
     double avgPitch = 60;
     juce::String label;
     bool drums = false;
+    std::shared_ptr<InstrumentPreset> preset;   // a pool preset for the whole track (instead of role / program)
     int role = 0;              // 0 automatic, 1 lead, 2 bass, 3 pad, 4 drums
 };
 
@@ -123,6 +126,20 @@ struct Builder
         return instrument (key, tb.ad, tb.sr, arp, 0);
     }
 
+    int preset (const InstrumentPreset& p)
+    {
+        const juce::String key = "p:" + juce::String (InstrumentPool::keyOf (p));
+        if (auto it = insMap.find (key); it != insMap.end()) return it->second;
+        if (nextIns > 31) { overflowIns = true; return 1; }
+        const int id = nextIns++;
+        juce::String err;
+        if (! InstrumentPool::apply (t, id, p, err)) { --nextIns; overflowArp = true; return 1; }
+        for (int r = 255; r >= 0; --r)
+            if (t.get (NpTune::tabArpeggio, r, 0) != 0 || t.get (NpTune::tabArpeggio, r, 1) != 0) { nextArp = std::max (nextArp, r + 1); break; }
+        insMap[key] = id;
+        return id;
+    }
+
     int drum (int kind)
     {
         const juce::String key = "d:" + juce::String (kind);
@@ -173,7 +190,8 @@ std::vector<NpRow> buildMelodic (const VoiceMix& v, double rowSec, int totalRows
         if (i + 1 < slots.size()) nextSr = (int) std::lround (slots[i + 1].start / rowSec);
         if (nextSr <= sr || sr < 0 || sr >= totalRows) continue;                       // two slots on one row: the later one wins
         if (slots[i].drum) { rows[(size_t) sr] = { (juce::uint8) (0xa0 + b.drum (drumKindOf (slots[i].pitches.front()))), 48 }; continue; }
-        const Timbre tb = pickTimbre (v.srcs[(size_t) slots[i].src]);
+        const auto& source = v.srcs[(size_t) slots[i].src];
+        const Timbre tb = pickTimbre (source);
         const int er = std::min (nextSr, std::max (sr + 1, (int) std::lround (slots[i].end / rowSec)));
         auto p = slots[i].pitches;
         std::sort (p.begin(), p.end());
@@ -183,7 +201,8 @@ std::vector<NpRow> buildMelodic (const VoiceMix& v, double rowSec, int totalRows
         std::set<int> classes;
         for (int q : p) if ((q - base) % 12 != 0) classes.insert ((q - base) % 12);
         int id;
-        if (classes.empty()) id = b.single (tb);
+        if (source.preset != nullptr) id = b.preset (*source.preset);        // the preset plays the lowest note of a chord
+        else if (classes.empty()) id = b.single (tb);
         else
         {
             std::vector<int> iv (classes.begin(), classes.end());
@@ -318,6 +337,11 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
             iv.avgPitch = sum / (double) iv.notes.size();
             iv.role = juce::jlimit (0, 4, sc.role);
             iv.drums = iv.role == 4 || (iv.role == 0 && iv.channel == 10);
+            if (! sc.preset.empty())
+            {
+                InstrumentPreset pr;
+                if (InstrumentPool::find (sc.preset, pr)) { iv.preset = std::make_shared<InstrumentPreset> (pr); iv.drums = false; iv.label += " [" + pr.name + "]"; }
+            }
             levels.push_back (iv.notes);
             if (vm.label.isNotEmpty()) vm.label << " + ";
             vm.label << iv.label;
@@ -347,7 +371,8 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     for (auto& vm : voices)
         for (size_t si = 0; si < vm.srcs.size(); ++si)
         {
-            if (vm.srcs[si].drums) { for (auto& n : vm.notes) if (n.src == (int) si) b.drum (drumKindOf (n.pitch)); }
+            if (vm.srcs[si].preset != nullptr) b.preset (*vm.srcs[si].preset);
+            else if (vm.srcs[si].drums) { for (auto& n : vm.notes) if (n.src == (int) si) b.drum (drumKindOf (n.pitch)); }
             else b.single (pickTimbre (vm.srcs[si]));
         }
     for (int v = 0; v < 3; ++v)

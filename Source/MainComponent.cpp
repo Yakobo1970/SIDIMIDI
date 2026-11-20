@@ -194,7 +194,7 @@ void MainComponent::applyLanguage()
     tabSid.setTooltip (T ("SID-Archiv: Datenbank der SID-Dateien, Ablauf der Tunes, HVSC, Konvertierung nach MIDI"));
     tabMidi.setTooltip (T ("MIDI-Ordner öffnen und einzelne MIDI-Dateien nach SID konvertieren"));
     aboutBtn.setTooltip (T ("Über SIDiMIDI, Spenden und Tooltipps"));
-    for (auto& s : scopes) if (s != nullptr) s->setTooltip (T ("Oszillatoren der drei SID-Stimmen (live beim Abspielen)"));
+    for (auto& s : scopes) if (s != nullptr) s->setTooltip (T ("Die drei SID-Oszillatoren OSC1–3 (live beim Abspielen)"));
     shownUpdate = "-";
     refreshUpdateHint();
     if (sidPane != nullptr) sidPane->applyLanguage();

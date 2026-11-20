@@ -1,6 +1,7 @@
 // SIDiMIDI – several MIDI tracks on one voice: which tracks, in which role, and who wins when they sound together.
 #pragma once
 #include <array>
+#include <string>
 #include <map>
 #include <vector>
 #include <algorithm>
@@ -14,6 +15,7 @@ struct MidiVoiceSource
     int part = -1;
     int role = 0;          // 0 automatic, 1 lead, 2 bass, 3 pad, 4 drums
     int priority = 0;      // 0 = highest: it wins when tracks of the same voice sound together
+    std::string preset;    // key of an instrument pool preset (InstrumentPool::keyOf); empty = the sound follows the role
 };
 using VoiceSources = std::array<std::vector<MidiVoiceSource>, 3>;
 

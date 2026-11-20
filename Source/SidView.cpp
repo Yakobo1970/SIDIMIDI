@@ -238,7 +238,7 @@ void SidView::renderCache()
         // voice label
         g.setColour (vc.withAlpha (muteLanes[v] ? 0.4f : 1.0f));
         g.setFont (ui::font (11.5f, true));
-        g.drawText (T ("Stimme %1", v + 1), lane.getX() + 8, lane.getY() + 1, 90, 14, juce::Justification::centredLeft, false);
+        g.drawText ("OSC" + juce::String (v + 1), lane.getX() + 8, lane.getY() + 1, 90, 14, juce::Justification::centredLeft, false);
 
         const float barH = juce::jlimit (3.0f, 11.0f, h / range * 1.15f);
         const auto& voice = t.v[v];
@@ -376,7 +376,7 @@ juce::String SidView::getTooltip()
 {
     if (current == nullptr || hoverX < 0) return {};
     const auto geo = geometry();
-    if (hoverX < geo.plot.getX()) return T ("Klick auf den Stimmennamen schaltet die Stimme stumm");
+    if (hoverX < geo.plot.getX()) return T ("Klick auf den Namen OSC1–3 schaltet den Oszillator stumm");
     const double s = xToSeconds (hoverX);
     if (s < 0 || s > current->seconds()) return {};
     const auto f = std::min<juce::uint32> (current->frames - 1, current->frameAt (s));
@@ -385,7 +385,7 @@ juce::String SidView::getTooltip()
     for (int v = 0; v < 3; ++v)
     {
         const float n = current->v[v].note[f];
-        text << "\n" << T ("Stimme %1", v + 1) << ": " << (n >= 0 ? noteName (n) + "  " + T (waves[current->v[v].wave[f] & 15]) : juce::String ("–"));
+        text << "\n" << "OSC" << (v + 1) << ": " << (n >= 0 ? noteName (n) + "  " + T (waves[current->v[v].wave[f] & 15]) : juce::String ("–"));
     }
     return text;
 }
