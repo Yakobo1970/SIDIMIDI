@@ -9,7 +9,7 @@ Von / by **Un(d)AbtanzBAR** · [undabtanzbar.de/software/sidimidi](https://www.u
 
 ## Download
 
-Den Installer gibt es unter **[Releases](https://github.com/Yakobo1970/SIDIMIDI/releases/latest)** (`SIDiMIDI_Setup_v2.0.0.exe`).
+Den Installer gibt es unter **[Releases](https://github.com/Yakobo1970/SIDIMIDI/releases/latest)** (`SIDiMIDI_Setup_v2.0.1.exe`).
 *Get the installer from **[Releases](https://github.com/Yakobo1970/SIDIMIDI/releases/latest)**.*
 Eine Installation von 1.0 wird aktualisiert (gleiche AppId). Das Programm meldet neue Versionen selbst (einmal am Tag, abschaltbar).
 
@@ -42,7 +42,7 @@ Ein Tracker für die Tunes des **NewPlayer** von Jens-Christian Huus (JCH, Vibra
 - Abspielen des Tunes oder nur des markierten Bereichs, mit Wiederholen; Stummschalten und **Sperren** je OSC;
 - **Klaviatur** im Stil des M-VAVE FM-1 (Maus oder MIDI-Keyboard) und **Aufnahme-Knopf**;
 - Notennamen tippen (C D E F G A H, `#`, `b`, Oktavziffer, Return) oder die **JCH-Tastenbelegung** (Q2W3ER5T6Y7U …);
-- **Instrumentenpool** (Rechtsklick auf die Instrumentennummer): 44 Werkspresets (Leads, Bässe, Arpeggios, Pads, Kicks, Snares, Hi-Hats, Effekte), eigene Presets speichern, laden, löschen;
+- **Instrumentenpool** (Rechtsklick auf die Instrumentennummer): 98 Werkspresets (Leads, Bässe, Arpeggios, Pads, Kicks, Snares, Hi-Hats, Effekte), eigene Presets speichern, laden, löschen;
 - **MIDI → Tracker** mit Akkord-Arpeggien, Drum-Instrumenten (Kick, Snare, Tom, Becken, Hi-Hat), Puls und Hard-Restart.
 
 ## Selbst bauen
