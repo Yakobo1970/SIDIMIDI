@@ -107,6 +107,7 @@ public:
                 main.sidTab().play (main.sidTab().selected(), 0);
                 wait (m.getIntValue());
             }
+            if (const auto sg = arg ("song"); sg.isNotEmpty()) { main.sidTab().selectSongForTest (sg.getIntValue()); wait (300); }
             if (const auto p = arg ("play"); p.isNotEmpty()) main.sidTab().view().setPlayFrame (p.getIntValue());
             if (args.contains ("about")) main.showAbout (true);
             if (args.contains ("tips")) { main.showAbout (true); }

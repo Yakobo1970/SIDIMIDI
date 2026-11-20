@@ -322,7 +322,6 @@ const Row kRows[] = {
     { "Oszillatoren der drei SID-Stimmen (live beim Abspielen)", "Oscillators of the three SID voices (live while playing)", "Oscillateurs des trois voix SID (en direct pendant la lecture)" },
     { "HVSC-Sammlung aktualisieren … (neu: #%1)", "Update HVSC collection … (new: #%1)", "Mettre à jour la collection HVSC … (nouveau : #%1)" },
     { "HVSC-Sammlung prüfen und aktualisieren …", "Check and update HVSC collection …", "Vérifier et mettre à jour la collection HVSC …" },
-    { "Dieses Stück wiederholen. Ohne Wiederholen geht es mit dem nächsten der Liste weiter – am Listenende wieder von vorn", "Repeat this tune. Without repeat the next one in the list follows – at the end of the list it starts again from the top", "Répéter ce morceau. Sans répétition, le suivant de la liste suit – à la fin de la liste, on recommence en haut" },
     { "Nichts zum Rückgängigmachen", "Nothing to undo", "Rien à annuler" },
     { "Rückgängig gemacht: %1", "Undone: %1", "Annulé : %1" },
     { "Nicht alles zurückgesetzt:", "Not everything was restored:", "Tout n'a pas été restauré :" },
@@ -505,6 +504,9 @@ const Row kRows[] = {
     { "Tracker", "Tracker", "Tracker" },
     { "Titel im Infobereich der .sid (Vorgabe: der Dateiname)", "Title in the info area of the .sid (default: the file name)", "Titre dans la zone d'informations du .sid (par défaut : le nom du fichier)" },
     { "Autor im Infobereich der .sid; Ihre Angabe wird als Vorgabe gemerkt", "Author in the info area of the .sid; your entry is remembered as the default", "Auteur dans la zone d'informations du .sid ; votre saisie est retenue comme valeur par défaut" },
+    { "Diesen Song wiederholen. Ohne Wiederholen folgen erst die weiteren Songs des Tunes, dann der nächste Tune der Liste – am Listenende wieder von vorn", "Repeat this song. Without repeat the other songs of the tune follow first, then the next tune in the list – at the end of the list it starts again from the top", "Répéter ce morceau. Sans répétition, les autres morceaux du fichier suivent d'abord, puis le fichier suivant de la liste – à la fin de la liste, on recommence en haut" },
+    { "Vorheriger Song (Subtune) dieses Tunes", "Previous song (sub-tune) of this tune", "Morceau (sous-morceau) précédent de ce fichier" },
+    { "Nächster Song (Subtune) dieses Tunes", "Next song (sub-tune) of this tune", "Morceau (sous-morceau) suivant de ce fichier" },
     // ---- table end
 };
 

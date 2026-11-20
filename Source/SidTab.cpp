@@ -66,6 +66,36 @@ void RepeatButton::paintButton (juce::Graphics& g, bool over, bool down)
     }
 }
 
+void SkipButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    auto* l = dynamic_cast<ui::Look*> (&getLookAndFeel());
+    const auto& th = l != nullptr ? l->theme() : themes()[0];
+    const bool on = isEnabled();
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    auto base = on ? juce::Colour (0xffe8c32e) : th.panel2;          // yellow / the dark blue of an inactive repeat button
+    if (on && over) base = base.brighter (0.12f);
+    if (on && down) base = base.darker (0.15f);
+    g.setColour (base);
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (on ? juce::Colour (0xff2a1f4a) : th.dim.withAlpha (0.6f));
+    const auto c = r.getCentre();
+    const float h = std::min (r.getHeight() * 0.28f, 6.5f), w = h * 0.95f, bar = 1.8f;
+    juce::Path p;
+    if (forward)    // >>I
+    {
+        const float x0 = c.x - w * 1.0f - 2.5f;
+        for (int i = 0; i < 2; ++i) p.addTriangle (x0 + w * (float) i, c.y - h, x0 + w * (float) i, c.y + h, x0 + w * (float) (i + 1), c.y);
+        p.addRectangle (x0 + w * 2.0f + 1.5f, c.y - h, bar, h * 2.0f);
+    }
+    else            // I<<
+    {
+        const float x0 = c.x + w * 1.0f + 2.5f;
+        for (int i = 0; i < 2; ++i) p.addTriangle (x0 - w * (float) i, c.y - h, x0 - w * (float) i, c.y + h, x0 - w * (float) (i + 1), c.y);
+        p.addRectangle (x0 - w * 2.0f - 1.5f - bar, c.y - h, bar, h * 2.0f);
+    }
+    g.fillPath (p);
+}
+
 // ================================================================================================ SidTab
 SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archive())
 {
@@ -87,6 +117,10 @@ SidTab::SidTab (MainComponent& m) : main (m), arch (m.archive()), list (m.archiv
     trackerBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
     trackerBtn.onClick = [this] { main.openTracker(); };
     addAndMakeVisible (repeatBtn);
+    addAndMakeVisible (prevSong);
+    addAndMakeVisible (nextSong);
+    prevSong.onClick = [this] { stepSong (-1); };
+    nextSong.onClick = [this] { stepSong (1); };
     addAndMakeVisible (search);
     playBtn.setButtonText (juce::String::fromUTF8 ("▶"));
     stopBtn.setButtonText (juce::String::fromUTF8 ("■"));
@@ -226,7 +260,9 @@ void SidTab::applyLanguage()
     filterBtn.setTooltip (T ("Nach Herkunft und Besonderheiten filtern"));
     ratingBtn.setTooltip (T ("Nur Tunes ab einer Mindestbewertung zeigen"));
     onlyFav.setTooltip (T ("Nur Favoriten zeigen"));
-    repeatBtn.setTooltip (T ("Dieses Stück wiederholen. Ohne Wiederholen geht es mit dem nächsten der Liste weiter – am Listenende wieder von vorn"));
+    repeatBtn.setTooltip (T ("Diesen Song wiederholen. Ohne Wiederholen folgen erst die weiteren Songs des Tunes, dann der nächste Tune der Liste – am Listenende wieder von vorn"));
+    prevSong.setTooltip (T ("Vorheriger Song (Subtune) dieses Tunes"));
+    nextSong.setTooltip (T ("Nächster Song (Subtune) dieses Tunes"));
     position.setTooltip (T ("Position im Tune (Klick oder Ziehen springt)"));
     zoomReset.setTooltip (T ("Zoom zurücksetzen (Strg + Mausrad zoomt, Doppelklick in der Darstellung ebenfalls)"));
     clearFilters.setTooltip (T ("Alle Suchfelder und Filter leeren"));
@@ -253,6 +289,13 @@ void SidTab::updateButtons()
     ratingBtn.setButtonText (minStars > 0 ? juce::String::fromUTF8 ("≥ ") + juce::String (minStars) + juce::String::fromUTF8 (" ★") : juce::String::fromUTF8 ("★"));
     clearFilters.setVisible (list.hasFilters());
     playBtn.setButtonText (isPlaying() ? juce::String::fromUTF8 ("❚❚") : juce::String::fromUTF8 ("▶"));
+    {
+        auto* e = selected();
+        const int song = chosenSong();
+        const bool back = e != nullptr && song > 1, ahead = e != nullptr && song < e->songs;
+        if (prevSong.isEnabled() != back) { prevSong.setEnabled (back); prevSong.repaint(); }
+        if (nextSong.isEnabled() != ahead) { nextSong.setEnabled (ahead); nextSong.repaint(); }
+    }
 }
 
 void SidTab::updateEmptyHint()
@@ -310,6 +353,8 @@ void SidTab::resized()
     songBox.setBounds (gh.removeFromLeft (190)); gh.removeFromLeft (10);
     zoomReset.setBounds (gh.removeFromLeft (100)); gh.removeFromLeft (22);
     // transport: play / pause, stop, repeat and the position with the time
+    prevSong.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
+    nextSong.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (10);
     playBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
     stopBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (4);
     repeatBtn.setBounds (gh.removeFromLeft (40)); gh.removeFromLeft (10);
@@ -338,6 +383,7 @@ void SidTab::onSelectionChanged (Entry* e)
     {
         graph.show (nullptr, 0);
         updateInfo (nullptr);
+        updateButtons();
         return;
     }
     const int n = std::min (e->songs, 256);
@@ -350,19 +396,32 @@ void SidTab::onSelectionChanged (Entry* e)
     songBox.setSelectedId (juce::jlimit (1, std::max (1, n), song), juce::dontSendNotification);
     graph.show (e, song);
     updateInfo (e);
+    updateButtons();
 }
 
 int SidTab::chosenSong() const { return std::max (1, songBox.getSelectedId()); }
+
+void SidTab::stepSong (int delta)
+{
+    auto* e = selected();
+    if (e == nullptr) return;
+    const int song = juce::jlimit (1, std::max (1, std::min (e->songs, 256)), chosenSong() + delta);
+    if (song == chosenSong()) return;
+    songBox.setSelectedId (song, juce::dontSendNotification);
+    onSongChosen();
+}
 
 void SidTab::onSongChosen()
 {
     auto* e = selected();
     if (e == nullptr) return;
+    updateButtons();
     const int song = chosenSong();
     const bool wasPlayingThis = isPlaying() && playingId == e->id;
     graph.show (e, song);
     updateInfo (e);
     if (wasPlayingThis) play (e, song);
+    updateButtons();
 }
 
 juce::String SidTab::infoText (const Entry& e) const
@@ -549,13 +608,14 @@ void SidTab::timerCallback()
         position.repaint();
         if (pl.takeSidFinished())
         {
-            if (repeatBtn.getToggleState())      // repeat: the same tune once more
+            auto* e = arch.byId (playingId);
+            if (repeatBtn.getToggleState())      // repeat: the same song once more
             {
-                auto* e = arch.byId (playingId);
                 const int song = playingSong;
                 if (e != nullptr) play (e, song); else stopPlayback();
             }
-            else playNext (1, true);              // otherwise the next one; the list starts again from the top at its end
+            else if (e != nullptr && playingSong < e->songs) play (e, playingSong + 1);   // the next song (sub-tune) of the tune
+            else playNext (1, true);              // then the next tune; the list starts again from the top at its end
         }
     }
     if (arch.isScanning() || scan.getButtonText() != (arch.isScanning() ? T ("Stopp") : T ("Einlesen"))) updateButtons();

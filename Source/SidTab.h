@@ -44,6 +44,16 @@ public:
     void paintButton (juce::Graphics&, bool over, bool down) override;
 };
 
+// previous / next song (sub-tune) of the tune: yellow while there is one to go to, dark blue otherwise
+class SkipButton : public juce::Button
+{
+public:
+    explicit SkipButton (bool forwardDirection) : juce::Button ("skip"), forward (forwardDirection) {}
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+private:
+    bool forward;
+};
+
 class SidTab : public juce::Component, private juce::Timer
 {
 public:
@@ -66,6 +76,7 @@ public:
     void stopPlayback();
     bool isPlaying() const;
     void playNext (int delta, bool wrap = false);
+    void stepSong (int delta);          // previous / next song (sub-tune) of the selected tune
 
     // folders and scanning
     void addFolders (const juce::StringArray& paths);
@@ -84,6 +95,7 @@ public:
 
     // used by the test tool
     void selectRowForTest (int row) { list.selectRow (row); }
+    void selectSongForTest (int song) { songBox.setSelectedId (song, juce::dontSendNotification); onSongChosen(); }
 
 private:
     MainComponent& main;
@@ -94,7 +106,8 @@ private:
     PositionBar position;
     juce::TextButton folders, scan, playBtn, stopBtn, filterBtn, ratingBtn, clearFilters, zoomReset;
     juce::TextButton onlyFav, trackerBtn;     // only the heart (favourites) and the green tracker button
-    RepeatButton repeatBtn;                  // repeat the single tune
+    RepeatButton repeatBtn;                  // repeat the current song
+    SkipButton prevSong { false }, nextSong { true };
     juce::TextEditor search, info;
     juce::ComboBox songBox;
     juce::Label emptyHint, songLabel;
