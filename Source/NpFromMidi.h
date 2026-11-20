@@ -12,6 +12,7 @@ struct NpImport
 {
     bool ok = false;
     NpTune tune;
+    double startOffset = 0;    // seconds of the MIDI file before the first note (the tune begins with the first note)
     juce::String report;       // what was done (tempo, voices, chords, sequences …) or why it failed
 };
 

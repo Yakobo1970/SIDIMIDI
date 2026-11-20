@@ -5,6 +5,8 @@
 #include "MidiToSidCore.h"
 #include "SidInfo.h"
 #include "InstrumentPool.h"
+#include "NpFromMidi.h"
+#include <BinaryData.h>
 #include "SidTrace.h"
 
 namespace sm
@@ -213,6 +215,19 @@ public:
         playBtn.onClick = [this] { playAssigned(); };
         for (auto* b : { &convertBtn, &cancelBtn, &stopBtn, &playBtn }) addAndMakeVisible (b);
         for (int v = 0; v < 3; ++v) { scopes[v] = std::make_unique<ScopeBox> (main.player(), v); addAndMakeVisible (*scopes[v]); }
+        if (toTracker)
+        {
+            sidSound.setButtonText (T ("Klang: SID"));
+            sidSound.setTooltip (T ("Vorhören mit dem Klang der Konvertierung: Rollen und Presets werden mit der SID-Emulation gespielt. Aus: der GM-Synth des Computers spielt die Spuren"));
+            sidSound.setToggleState ((bool) main.archive().settings.getProperty ("pickSidSound", true), juce::dontSendNotification);
+            sidSound.onClick = [this]
+            {
+                main.archive().settings.setProperty ("pickSidSound", sidSound.getToggleState(), nullptr);
+                main.notifySettings();
+                if (anyActive()) { const bool was = main.player().isPlaying(); sidPlaying = false; applyPreview (was); }
+            };
+            addAndMakeVisible (sidSound);
+        }
         timeLabel.setFont (font (15.0f, true));
         timeLabel.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (timeLabel);
@@ -252,6 +267,7 @@ public:
         playBtn.setBounds (top.removeFromLeft (46)); top.removeFromLeft (4);
         stopBtn.setBounds (top.removeFromLeft (46)); top.removeFromLeft (10);
         timeLabel.setBounds (top.removeFromLeft (120)); top.removeFromLeft (10);
+        if (toTracker) { sidSound.setBounds (top.removeFromLeft (104).withSizeKeepingCentre (104, 24)); top.removeFromLeft (10); }
         const int sw = (top.getWidth() - 12) / 3;
         for (int v = 0; v < 3; ++v) { scopes[v]->setBounds (top.removeFromLeft (sw)); top.removeFromLeft (6); }
         b.removeFromTop (6);
@@ -318,7 +334,7 @@ public:
         }
         if (active[(size_t) row] != 0 && total > 0)
         {
-            const double at = main.player().getMidiElapsedSeconds();
+            const double at = elapsedNow();
             g.setColour (juce::Colour (0xff2f9e44));
             g.fillRect (map.getX() + (int) std::lround (juce::jlimit (0.0, 1.0, at / total) * (kMiniW - 1)), map.getY(), 2, kMiniH);
         }
@@ -430,9 +446,63 @@ public:
 
     // ---- preview: tracks are switched on and off one by one; they sound together
     bool anyActive() const { for (auto a : active) if (a != 0) return true; return false; }
+    double elapsedNow() const { return sidPlaying ? (double) main.player().getPlayFrame() / sidFps + sidOffset : main.player().getMidiElapsedSeconds(); }
+
+    // the sound of the conversion: the tune is built from the tracks that are switched on (with their roles, presets and priorities),
+    // played by the emulation, and it goes on at the point where the music was
+    void applySidPreview (bool wasAny)
+    {
+        VoiceSources src;
+        int rank = 0;
+        bool any = false;
+        for (size_t i = 0; i < tracks.size(); ++i)
+            if (active[i] != 0)
+            {
+                const bool assigned = voiceOf[i] > 0;
+                const size_t v = assigned ? (size_t) voiceOf[i] - 1 : (size_t) (rank++ % 3);
+                src[v].push_back ({ tracks[i].partId(), roleOf[i], assigned && shared (i) ? prioOf[i] : 100 + (int) i,
+                                    presetOf[i] >= 0 ? InstrumentPool::keyOf (presets[(size_t) presetOf[i]]) : std::string() });
+                any = true;
+            }
+        if (! any) { main.player().stop(); sidPlaying = false; return; }
+        const double elapsed = wasAny && main.player().isPlaying() ? elapsedNow() : 0.0;
+        const int gen = ++generation;
+        ++pending;
+        const auto file = tab.item (itemIndex)->file;
+        juce::Component::SafePointer<TrackPickPanel> safe (this);
+        main.jobs().addJob ([safe, file, src, gen, elapsed]
+        {
+            auto r = npImportMidi (file, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, src);
+            juce::MemoryBlock psid;
+            if (r.ok) psid = r.tune.toPsid ("Vorschau", "SIDiMIDI", "");
+            auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
+            auto t = r.ok ? computeTrace (si, 1, juce::jlimit (3.0, 900.0, r.tune.estimateSeconds() + 1.0)) : nullptr;
+            juce::MessageManager::callAsync ([safe, t, si, gen, elapsed, off = r.startOffset, ok = r.ok]
+            {
+                if (safe == nullptr) return;
+                --safe->pending;
+                if (gen != safe->generation) return;               // a newer choice (or stop) has come in meanwhile
+                if (! ok || t == nullptr || t->empty())
+                {
+                    std::fill (safe->active.begin(), safe->active.end(), (char) 0);
+                    safe->list.updateContent();
+                    safe->main.setStatus (T ("Die Spur lässt sich nicht vorhören"));
+                    return;
+                }
+                safe->tab.stopPreview();
+                safe->main.sidTab().stopPlayback();
+                safe->main.player().playTrace (*t->events, t->fps, t->frames, (juce::uint32) std::max (0.0, (elapsed - off) * t->fps), si.ntsc());
+                safe->sidPlaying = true;
+                safe->sidOffset = off;
+                safe->sidFps = t->fps;
+            });
+        });
+    }
 
     void applyPreview (bool wasAny)
     {
+        if (toTracker && sidSound.getToggleState()) { applySidPreview (wasAny); return; }
+        sidPlaying = false;
         std::vector<AudioPlayerEngine::PreviewTrack> sel;
         int rank = 0;
         for (size_t i = 0; i < tracks.size(); ++i)
@@ -467,6 +537,7 @@ public:
         for (size_t i = 0; i < tracks.size(); ++i) { active[i] = voiceOf[i] > 0 ? 1 : 0; any = any || voiceOf[i] > 0; }
         if (! any) std::fill (active.begin(), active.end(), (char) 1);
         main.player().stop();                                // from the beginning
+        sidPlaying = false;
         applyPreview (false);
         (void) was;
         list.updateContent();
@@ -475,6 +546,8 @@ public:
 
     void stopAll()
     {
+        ++generation;
+        sidPlaying = false;
         std::fill (active.begin(), active.end(), (char) 0);
         main.player().stop();
         list.updateContent();
@@ -485,13 +558,14 @@ public:
     void updateTime()
     {
         const bool playing = anyActive() && main.player().isPlaying();
-        timeLabel.setText (formatTime (playing ? main.player().getMidiElapsedSeconds() : 0.0) + " / " + formatTime (total), juce::dontSendNotification);
+        timeLabel.setText (formatTime (playing ? elapsedNow() : 0.0) + " / " + formatTime (total), juce::dontSendNotification);
     }
 
     void timerCallback() override
     {
-        if (anyActive() && ! main.player().isPlaying())      // the music is over
+        if (anyActive() && pending == 0 && ! main.player().isPlaying())      // the music is over
         {
+            sidPlaying = false;
             std::fill (active.begin(), active.end(), (char) 0);
             list.updateContent();
         }
@@ -583,6 +657,10 @@ private:
     juce::ListBox list;
     juce::TextButton convertBtn, cancelBtn, stopBtn, playBtn;
     juce::Label help, timeLabel;
+    juce::ToggleButton sidSound;                   // tracker: listen with the sound of the conversion (SID emulation) instead of the GM synth
+    bool sidPlaying = false;
+    double sidOffset = 0, sidFps = 50.1245;
+    int generation = 0, pending = 0;
     std::unique_ptr<ScopeBox> scopes[3];
 };
 

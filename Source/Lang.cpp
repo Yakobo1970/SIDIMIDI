@@ -582,6 +582,8 @@ const Row kRows[] = {
     { "OSC%1 ist wieder frei zum Bearbeiten", "OSC%1 can be edited again", "OSC%1 peut de nouveau être modifié" },
     { "OSC%1 ist gesperrt – das Symbol neben dem Namen gibt sie wieder frei", "OSC%1 is locked – the symbol beside its name unlocks it", "OSC%1 est verrouillé – le symbole à côté du nom le déverrouille" },
     { "Preset aus dem Instrumentenpool", "Preset from the instrument pool", "Preset de la banque d’instruments" },
+    { "Klang: SID", "Sound: SID", "Son : SID" },
+    { "Vorhören mit dem Klang der Konvertierung: Rollen und Presets werden mit der SID-Emulation gespielt. Aus: der GM-Synth des Computers spielt die Spuren", "Listen with the sound of the conversion: roles and presets are played by the SID emulation. Off: the computer’s GM synth plays the tracks", "Écoute avec le son de la conversion : rôles et presets sont joués par l’émulation SID. Désactivé : le synthé GM de l’ordinateur joue les pistes" },
     // ---- table end
 };
 

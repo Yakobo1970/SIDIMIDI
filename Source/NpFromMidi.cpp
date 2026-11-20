@@ -355,6 +355,7 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     for (auto& v : voices) for (auto& n : v.notes) { endTime = std::max (endTime, n.end); firstStart = std::min (firstStart, n.start); ++noteCount; }
     if (noteCount == 0) { out.report = T ("Keine Spuren mit Noten gefunden"); return out; }
     // the tune begins with the first note (no silence in front)
+    out.startOffset = firstStart;
     for (auto& v : voices) for (auto& n : v.notes) { n.start -= firstStart; n.end -= firstStart; }
     endTime -= firstStart;
     const int totalRows = (int) std::ceil (endTime / rowSec) + 2;
