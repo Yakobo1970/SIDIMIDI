@@ -538,6 +538,13 @@ const Row kRows[] = {
     { "Spielt die Spuren, die einer Stimme zugeordnet sind (ohne Zuordnung: alle Spuren)", "Plays the tracks that are assigned to a voice (none assigned: all tracks)", "Joue les pistes attribuées à une voix (aucune attribuée : toutes les pistes)" },
     { "Die Spur lässt sich nicht vorhören", "The track cannot be played", "La piste ne peut pas être écoutée" },
     { "Diese Spur ein- oder ausschalten (hörbar = grün); mehrere Spuren gleichzeitig sind möglich", "Switch this track on or off (audible = green); several tracks can play together", "Activer ou désactiver cette piste (audible = vert) ; plusieurs pistes peuvent jouer ensemble" },
+    { "Klaviatur", "Keyboard", "Clavier" },
+    { "Klaviatur zum Spielen und Eingeben von Noten: mit der Maus oder mit einem angeschlossenen MIDI-Keyboard. Der Notenwert erscheint an der Cursor-Position", "Keyboard for playing and entering notes: with the mouse or a connected MIDI keyboard. The note value appears at the cursor position", "Clavier pour jouer et saisir des notes : à la souris ou avec un clavier MIDI branché. La valeur de la note apparaît à la position du curseur" },
+    { "MIDI-Eingang", "MIDI input", "Entrée MIDI" },
+    { "Cursor weiter", "Cursor advances", "Curseur avance" },
+    { "Nach jeder Taste eine Zeile weiter. Aus: der Cursor bleibt stehen, nur der Notenwert an der Cursor-Position ändert sich", "One row further after every key. Off: the cursor stays, only the note value at the cursor position changes", "Une ligne plus loin après chaque touche. Désactivé : le curseur reste, seule la valeur de la note à la position du curseur change" },
+    { "Angeschlossenes MIDI-Keyboard: seine Tasten klingen und schreiben die Note an die Cursor-Position", "Connected MIDI keyboard: its keys sound and write the note at the cursor position", "Clavier MIDI branché : ses touches sonnent et écrivent la note à la position du curseur" },
+    { "Das MIDI-Gerät lässt sich nicht öffnen", "The MIDI device cannot be opened", "L’appareil MIDI ne peut pas être ouvert" },
     // ---- table end
 };
 

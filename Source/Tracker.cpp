@@ -10,6 +10,7 @@
 #include "SidView.h"
 #include <BinaryData.h>
 #include <map>
+#include <set>
 
 namespace sm
 {
@@ -155,8 +156,106 @@ TableInfo tableInfo (NpTune::Table t, int ver)
 class PatternView;
 class GridView;
 
+// ================================================================================================ the keyboard
+// 37 keys in the style of the M-VAVE FM-1: a near-black body, light grey keys with a front lip, glossy black keys; the tracker's
+// note value stands on every key. A held key sinks (mouse or a connected MIDI keyboard).
+class PianoView : public juce::Component
+{
+public:
+    static constexpr int kKeys = 37;
+    std::function<void (int, bool)> onKey;          // (tracker note value, pressed)
+
+    PianoView()
+    {
+        int w = 0;
+        for (int k = 0; k < kKeys; ++k) { whitesBelow[(size_t) k] = w; if (! isBlack (k)) ++w; }
+        whiteCount = w;
+    }
+    void setBase (int b) { base = juce::jlimit (0, 95 - (kKeys - 1), b); repaint(); }
+    void setHeld (int note, bool on) { if (on) held.insert (note); else held.erase (note); repaint(); }
+    static bool isBlack (int k) { const int p = k % 12; return p == 1 || p == 3 || p == 6 || p == 8 || p == 10; }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colour (0xff141517));
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 7.0f);
+        for (int k = 0; k < kKeys; ++k) if (! isBlack (k)) drawWhite (g, k);
+        for (int k = 0; k < kKeys; ++k) if (isBlack (k)) drawBlack (g, k);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override { press (keyAt (e.position)); }
+    void mouseDrag (const juce::MouseEvent& e) override { const int k = keyAt (e.position); if (k != current) { release(); press (k); } }
+    void mouseUp (const juce::MouseEvent&) override { release(); }
+
+private:
+    float keyW() const { return std::min (46.0f, ((float) getWidth() - 12.0f) / (float) whiteCount); }
+    float x0() const { return ((float) getWidth() - keyW() * (float) whiteCount) * 0.5f; }
+    juce::Rectangle<float> whiteRect (int k) const { return { x0() + keyW() * (float) whitesBelow[(size_t) k], 6.0f, keyW() - 1.5f, (float) getHeight() - 12.0f }; }
+    juce::Rectangle<float> blackRect (int k) const
+    {
+        const float bw = keyW() * 0.62f;
+        return { x0() + keyW() * (float) whitesBelow[(size_t) k] - bw * 0.5f - 0.5f, 6.0f, bw, ((float) getHeight() - 12.0f) * 0.62f };
+    }
+    int keyAt (juce::Point<float> p) const
+    {
+        for (int k = 0; k < kKeys; ++k) if (isBlack (k) && blackRect (k).contains (p)) return k;
+        for (int k = 0; k < kKeys; ++k) if (! isBlack (k) && whiteRect (k).contains (p)) return k;
+        return -1;
+    }
+    void press (int k)
+    {
+        if (k < 0) return;
+        current = k;
+        held.insert (base + k);
+        repaint();
+        if (onKey) onKey (base + k, true);
+    }
+    void release()
+    {
+        if (current < 0) return;
+        const int n = base + current;
+        current = -1;
+        held.erase (n);
+        repaint();
+        if (onKey) onKey (n, false);
+    }
+    void drawWhite (juce::Graphics& g, int k)
+    {
+        const auto r = whiteRect (k);
+        const bool down = held.count (base + k) > 0;
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (down ? 0xffbcbdc0 : 0xffd9dadd), r.getY(), juce::Colour (down ? 0xffcfd0d3 : 0xffeeeff1), r.getBottom()));
+        g.fillRoundedRectangle (r, 4.0f);
+        const float lip = down ? 6.0f : 13.0f;
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xffc3c4c8), r.getBottom() - lip, juce::Colour (0xffa9aaae), r.getBottom()));
+        g.fillRoundedRectangle (r.withTop (r.getBottom() - lip), 4.0f);
+        g.setColour (juce::Colour (down ? 0xff1c1d21 : 0xff4a4c52));
+        g.setFont (font (11.0f, k % 12 == 0));
+        g.drawText (noteText (base + k), r.withTrimmedBottom (lip).removeFromBottom (17.0f), juce::Justification::centred, false);
+    }
+    void drawBlack (juce::Graphics& g, int k)
+    {
+        const auto r = blackRect (k);
+        const bool down = held.count (base + k) > 0;
+        g.setColour (juce::Colour (0xff030303));
+        g.fillRoundedRectangle (r.translated (2.0f, 0.0f).withHeight (r.getHeight() + 6.0f), 4.0f);
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (down ? 0xff101113 : 0xff16171a), r.getY(), juce::Colour (down ? 0xff1d1e21 : 0xff2e3035), r.getBottom()));
+        g.fillRoundedRectangle (r, 4.0f);
+        const float hh = down ? r.getHeight() - 2.0f : r.getHeight() - 12.0f;
+        g.setColour (juce::Colour (down ? 0xff15161a : 0xff1b1c20));
+        g.fillRoundedRectangle (r.reduced (3.0f, 0.0f).withHeight (hh), 3.0f);
+        if (! down) { g.setColour (juce::Colour (0xff34363c)); g.fillRoundedRectangle (r.getX() + 6.0f, r.getY() + 5.0f, 2.5f, hh - 12.0f, 1.2f); }
+        g.setColour (juce::Colour (0xffb7bac2));
+        g.setFont (font (9.5f));
+        g.drawText (noteText (base + k), r.withTrimmedBottom (down ? 2.0f : 12.0f).removeFromBottom (14.0f), juce::Justification::centred, false);
+    }
+
+    int base = 48, current = -1, whiteCount = 22;
+    std::array<int, kKeys> whitesBelow {};
+    std::set<int> held;
+};
+
 // ================================================================================================ the panel
-class TrackerPanel : public juce::Component, private juce::Timer
+class TrackerPanel : public juce::Component, private juce::Timer, private juce::MidiInputCallback, private juce::AsyncUpdater
 {
 public:
     TrackerPanel (MainComponent& m, TrackerWindow& w);
@@ -182,6 +281,8 @@ public:
     void pasteSel();
     void cutSel();
     void applyPlayRange();
+    void showPianoForTest() { pianoBtn.setToggleState (true, juce::dontSendNotification); applyPianoVisibility(); }
+    void holdKeyForTest (int note) { piano.setHeld (note, true); }
     // copied rows: up to three voices side by side
     struct Clip { int voices = 0, rows = 0; std::array<std::vector<NpRow>, 3> data; } clip;
     bool isPlaying() const { return playing; }
@@ -215,6 +316,35 @@ private:
     RepeatButton repeatBtn;                             // repeat the tune or the marked area
     juce::TextButton metroBtn;                          // metronome click on every beat (off by default)
     void applyMetronome();
+    // ---- keyboard: the mouse or a connected MIDI keyboard plays a note and writes its value at the cursor
+    PianoView piano;
+    juce::TextButton pianoBtn;
+    juce::ToggleButton advanceBtn;
+    juce::ComboBox midiInBox;
+    juce::Label midiInLbl;
+    juce::Array<juce::MidiDeviceInfo> midiDevices;
+    std::unique_ptr<juce::MidiInput> midiIn;
+    juce::CriticalSection midiLock;
+    std::vector<std::pair<int, bool>> midiQueue;
+    int auditionNote = -1;
+    void applyPianoVisibility();
+    void fillMidiDevices();
+    void updateMidiIn();
+    void pianoKey (int note, bool down);
+    void midiKey (int pitch, bool down);
+    void audition (int note);
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m) override
+    {
+        if (! (m.isNoteOn() || m.isNoteOff())) return;
+        { const juce::ScopedLock sl (midiLock); midiQueue.push_back ({ m.getNoteNumber(), m.isNoteOn() }); }
+        triggerAsyncUpdate();
+    }
+    void handleAsyncUpdate() override
+    {
+        std::vector<std::pair<int, bool>> q;
+        { const juce::ScopedLock sl (midiLock); q.swap (midiQueue); }
+        for (auto& e : q) midiKey (e.first, e.second);
+    }
     juce::uint32 playEndFrames = 0;
     int playEndRow = 0;
     juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel, titleLbl, authorLbl;
@@ -280,6 +410,34 @@ public:
         repaint();
     }
 
+    // ---- keyboard: the note goes to the cursor row
+    bool enterNote (int note, bool advance)
+    {
+        const auto* d = current();
+        if (d == nullptr || d->mark || d->broken) return false;
+        cf = 2;
+        cancelTyping();
+        setNote (note);
+        if (advance) move (0, 1);
+        return true;
+    }
+    int cursorTransposition() const
+    {
+        const auto* d = current();
+        if (d == nullptr || d->mark || d->broken) return 0;
+        const auto all = panel.tune.trackAll (cv);
+        return d->entry < (int) all.size() ? (int) all[(size_t) d->entry].trans - 0x80 : 0;
+    }
+    int instrumentAtCursor() const      // the last instrument command at or above the cursor (1 when there is none)
+    {
+        const auto& d = disp[(size_t) cv];
+        for (int r = std::min (cr, (int) d.size() - 1); r >= 0; --r)
+        {
+            const auto& x = d[(size_t) r];
+            if (! x.mark && ! x.broken && x.row.cmd >= 0xa0 && x.row.cmd < 0xc0) return x.row.cmd - 0xa0;
+        }
+        return 1;
+    }
     // ---- selection (Shift + mouse or Shift + arrow keys); it is also the area that plays
     bool hasSelection() const { return selActive; }
     void selection (int& v0, int& v1, int& r0, int& r1) const { v0 = sv0; v1 = sv1; r0 = sr0; r1 = sr1; }
@@ -1223,6 +1381,37 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     metroBtn.setClickingTogglesState (true);
     metroBtn.setTooltip (T ("Metronom: ein Klick auf jeden Schlag (alle 4 Zeilen), der erste Schlag eines Takts (16 Zeilen) klingt höher"));
     metroBtn.onClick = [this] { applyMetronome(); };
+    addAndMakeVisible (pianoBtn);
+    pianoBtn.setButtonText (T ("Klaviatur"));
+    pianoBtn.setClickingTogglesState (true);
+    pianoBtn.setToggleState ((bool) main.archive().settings.getProperty ("trackerPiano", false), juce::dontSendNotification);
+    pianoBtn.setTooltip (T ("Klaviatur zum Spielen und Eingeben von Noten: mit der Maus oder mit einem angeschlossenen MIDI-Keyboard. Der Notenwert erscheint an der Cursor-Position"));
+    pianoBtn.onClick = [this]
+    {
+        main.archive().settings.setProperty ("trackerPiano", pianoBtn.getToggleState(), nullptr);
+        main.notifySettings();
+        applyPianoVisibility();
+    };
+    addChildComponent (piano);
+    addChildComponent (midiInBox);
+    addChildComponent (midiInLbl);
+    addChildComponent (advanceBtn);
+    piano.onKey = [this] (int n, bool down) { pianoKey (n, down); };
+    piano.setBase (octave * 12);
+    midiInLbl.setText (T ("MIDI-Eingang"), juce::dontSendNotification);
+    midiInLbl.setFont (font (12.5f));
+    advanceBtn.setButtonText (T ("Cursor weiter"));
+    advanceBtn.setTooltip (T ("Nach jeder Taste eine Zeile weiter. Aus: der Cursor bleibt stehen, nur der Notenwert an der Cursor-Position ändert sich"));
+    advanceBtn.setToggleState ((bool) main.archive().settings.getProperty ("trackerAdvance", false), juce::dontSendNotification);
+    advanceBtn.onClick = [this] { main.archive().settings.setProperty ("trackerAdvance", advanceBtn.getToggleState(), nullptr); main.notifySettings(); };
+    midiInBox.setTooltip (T ("Angeschlossenes MIDI-Keyboard: seine Tasten klingen und schreiben die Note an die Cursor-Position"));
+    midiInBox.onChange = [this]
+    {
+        const int id = midiInBox.getSelectedId();
+        main.archive().settings.setProperty ("trackerMidiIn", id >= 2 && id - 2 < (int) midiDevices.size() ? midiDevices[(size_t) (id - 2)].name : juce::String(), nullptr);
+        main.notifySettings();
+        updateMidiIn();
+    };
     for (auto* b : { &octMinus, &octPlus, &spdMinus, &spdPlus }) addAndMakeVisible (*b);
     octMinus.setButtonText ("-"); octPlus.setButtonText ("+"); spdMinus.setButtonText ("-"); spdPlus.setButtonText ("+");
     octMinus.onClick = [this] { setOctave (octave - 1); };
@@ -1266,12 +1455,93 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     loadTune (t, {});
     selectTable (0);
     startTimerHz (30);
+    applyPianoVisibility();
 }
 
 TrackerPanel::~TrackerPanel()
 {
     stopTimer();
+    cancelPendingUpdate();
+    midiIn.reset();
     stop();
+}
+
+void TrackerPanel::applyPianoVisibility()
+{
+    const bool on = pianoBtn.getToggleState();
+    for (auto* c : std::initializer_list<juce::Component*> { &piano, &midiInBox, &midiInLbl, &advanceBtn }) c->setVisible (on);
+    if (on) fillMidiDevices();
+    updateMidiIn();
+    resized();
+}
+
+void TrackerPanel::fillMidiDevices()
+{
+    midiDevices = juce::MidiInput::getAvailableDevices();
+    midiInBox.clear (juce::dontSendNotification);
+    midiInBox.addItem (juce::String::fromUTF8 ("—"), 1);
+    for (int i = 0; i < (int) midiDevices.size(); ++i) midiInBox.addItem (midiDevices[(size_t) i].name, 2 + i);
+    const auto& st = main.archive().settings;
+    int sel = st.hasProperty ("trackerMidiIn") ? 1 : (midiDevices.isEmpty() ? 1 : 2);     // first use: the first keyboard that is there
+    const auto saved = st.getProperty ("trackerMidiIn").toString();
+    for (int i = 0; i < (int) midiDevices.size(); ++i) if (saved.isNotEmpty() && midiDevices[(size_t) i].name == saved) sel = 2 + i;
+    midiInBox.setSelectedId (sel, juce::dontSendNotification);
+}
+
+void TrackerPanel::updateMidiIn()
+{
+    midiIn.reset();
+    const int id = midiInBox.getSelectedId();
+    if (! pianoBtn.getToggleState() || id < 2 || id - 2 >= (int) midiDevices.size()) return;
+    midiIn = juce::MidiInput::openDevice (midiDevices[(size_t) (id - 2)].identifier, this);
+    if (midiIn != nullptr) midiIn->start();
+    else status (T ("Das MIDI-Gerät lässt sich nicht öffnen"));
+}
+
+// a key of the on-screen keyboard (tracker note value) or of the MIDI keyboard
+void TrackerPanel::pianoKey (int note, bool down)
+{
+    piano.setHeld (note, down);
+    if (down)
+    {
+        if (! playing) audition (note);             // first, with the instrument that stands at the cursor
+        pattern->enterNote (note, advanceBtn.getToggleState());
+    }
+    else if (auditionNote == note)
+    {
+        auditionNote = -1;
+        if (! playing) main.player().stop();
+    }
+}
+
+void TrackerPanel::midiKey (int pitch, bool down)
+{
+    // the pitch that sounds is the pitch of the key: the transposition of the track entry is taken out
+    pianoKey (juce::jlimit (1, 95, pitch - 12 - pattern->cursorTransposition()), down);
+}
+
+// one note with the instrument of the cursor row, on a small copy of the tune
+void TrackerPanel::audition (int note)
+{
+    NpTune t = tune;
+    std::vector<NpRow> rows (24), blank (16);
+    rows[0].cmd = (juce::uint8) (0xa0 + pattern->instrumentAtCursor());
+    rows[0].note = (juce::uint8) juce::jlimit (1, 95, note + pattern->cursorTransposition());
+    t.setSequence (1, rows);
+    t.setSequence (2, blank);
+    t.setTrackAll (0, { { 0x80, 1 }, { 0xff, 0 } });
+    t.setTrackAll (1, { { 0x80, 2 }, { 0xff, 0 } });
+    t.setTrackAll (2, { { 0x80, 2 }, { 0xff, 0 } });
+    main.sidTab().stopPlayback();
+    main.midiTab().stopPreview();
+    main.player().stop();
+    const auto psid = t.toPsid ("Tracker", "SIDiMIDI", "");
+    const auto si = parseSidBytes (psid.getData(), psid.getSize(), true);
+    auto tr = computeTrace (si, 1, 2.5);
+    if (tr == nullptr || tr->empty()) return;
+    for (int v = 0; v < 3; ++v) main.player().setVoiceMuted (v, false);
+    main.player().playTrace (*tr->events, tr->fps, tr->frames, 0, si.ntsc());
+    auditionNote = note;
 }
 
 void TrackerPanel::loadTune (const NpTune& t, const juce::File& f)
@@ -1345,6 +1615,7 @@ void TrackerPanel::updateTitle()
 void TrackerPanel::setOctave (int o)
 {
     octave = juce::jlimit (0, 7, o);
+    piano.setBase (octave * 12);
     octLabel.setText (T ("Oktave %1", octave), juce::dontSendNotification);
 }
 
@@ -1623,11 +1894,23 @@ void TrackerPanel::resized()
     copyBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (4);
     pasteBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (22);
     spdMinus.setBounds (row2.removeFromLeft (28)); spdLabel.setBounds (row2.removeFromLeft (80)); spdPlus.setBounds (row2.removeFromLeft (28)); row2.removeFromLeft (12);
-    octMinus.setBounds (row2.removeFromLeft (28)); octLabel.setBounds (row2.removeFromLeft (90)); octPlus.setBounds (row2.removeFromLeft (28));
+    octMinus.setBounds (row2.removeFromLeft (28)); octLabel.setBounds (row2.removeFromLeft (90)); octPlus.setBounds (row2.removeFromLeft (28)); row2.removeFromLeft (22);
+    pianoBtn.setBounds (row2.removeFromLeft (96));
     r.removeFromTop (4);
     infoLabel.setBounds (r.removeFromTop (22));
     statusLabel.setBounds (r.removeFromBottom (22));
     r.removeFromBottom (4);
+    if (pianoBtn.getToggleState())
+    {
+        auto pb = r.removeFromBottom (108);
+        r.removeFromBottom (6);
+        auto side = pb.removeFromLeft (190);
+        pb.removeFromLeft (8);
+        midiInLbl.setBounds (side.removeFromTop (22));
+        midiInBox.setBounds (side.removeFromTop (28)); side.removeFromTop (8);
+        advanceBtn.setBounds (side.removeFromTop (24));
+        piano.setBounds (pb);
+    }
     const int rightW = juce::jlimit (330, 520, r.getWidth() * 36 / 100);
     auto right = r.removeFromRight (rightW);
     r.removeFromRight (8);
@@ -1726,6 +2009,8 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
         if (c == '$') { content->pasteSel(); continue; }
         if (c == '%') { content->toggleMute (0); continue; }
         if (c == '+') { content->pattern->transpose (1); continue; }
+        if (c == '&') { content->showPianoForTest(); continue; }
+        if (c == '?') { content->holdKeyForTest (52); continue; }
         int code = c;
         if (c == '_') code = juce::KeyPress::downKey; else if (c == '^') code = juce::KeyPress::upKey;
         else if (c == '>') code = juce::KeyPress::rightKey; else if (c == '<') code = juce::KeyPress::leftKey;
