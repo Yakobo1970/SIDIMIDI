@@ -602,6 +602,8 @@ const Row kRows[] = {
     { "Position des Vorhörens: ziehen oder anklicken. Auch bei laufender Wiedergabe", "Position of the preview: drag or click. Also while it plays", "Position de l’écoute : faire glisser ou cliquer. Aussi pendant la lecture" },
     { "Vorheriges Preset (bei Schlagzeug: Kit); am Anfang kommt die Rolle zurück", "Previous preset (drums: kit); at the start the role comes back", "Preset précédent (batterie : kit) ; au début, le rôle revient" },
     { "Nächstes Preset (bei Schlagzeug: Kit); am Ende kommt die Rolle zurück", "Next preset (drums: kit); at the end the role comes back", "Preset suivant (batterie : kit) ; à la fin, le rôle revient" },
+    { "Eine Oktave höher (F8, oder das Mausrad über den Tasten)", "One octave up (F8, or the mouse wheel over the keys)", "Une octave plus haut (F8, ou la molette sur les touches)" },
+    { "Eine Oktave tiefer (F7, oder das Mausrad über den Tasten)", "One octave down (F7, or the mouse wheel over the keys)", "Une octave plus bas (F7, ou la molette sur les touches)" },
     // ---- table end
 };
 

@@ -172,7 +172,8 @@ public:
         for (int k = 0; k < kKeys; ++k) { whitesBelow[(size_t) k] = w; if (! isBlack (k)) ++w; }
         whiteCount = w;
     }
-    void setBase (int b) { base = juce::jlimit (0, 95 - (kKeys - 1), b); repaint(); }
+    void setBase (int b) { base = juce::jlimit (0, 48, b); repaint(); }      // whole octaves: the highest start is C-4 (note 48), the 37 keys then end at C-7
+    std::function<void (int)> onOctave;                                       // mouse wheel over the keys: +1 / -1 octave
     void setHeld (int note, bool on) { if (on) held.insert (note); else held.erase (note); repaint(); }
     static bool isBlack (int k) { const int p = k % 12; return p == 1 || p == 3 || p == 6 || p == 8 || p == 10; }
 
@@ -187,6 +188,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override { press (keyAt (e.position)); }
     void mouseDrag (const juce::MouseEvent& e) override { const int k = keyAt (e.position); if (k != current) { release(); press (k); } }
     void mouseUp (const juce::MouseEvent&) override { release(); }
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override { if (onOctave && w.deltaY != 0.0f) onOctave (w.deltaY > 0.0f ? 1 : -1); }
 
 private:
     float keyW() const { return std::min (46.0f, ((float) getWidth() - 12.0f) / (float) whiteCount); }
@@ -335,7 +337,7 @@ private:
     void applyMetronome();
     // ---- keyboard: the mouse or a connected MIDI keyboard plays a note and writes its value at the cursor
     PianoView piano;
-    juce::TextButton pianoBtn;
+    juce::TextButton pianoBtn, pOctUp, pOctDown;                        // octave up / down beside the keys
     juce::ToggleButton advanceBtn;
     juce::ComboBox midiInBox;
     juce::Label midiInLbl;
@@ -1511,6 +1513,14 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     addChildComponent (midiInLbl);
     addChildComponent (advanceBtn);
     piano.onKey = [this] (int n, bool down) { pianoKey (n, down); };
+    piano.onOctave = [this] (int d) { setOctave (octave + d); };
+    addChildComponent (pOctUp);
+    addChildComponent (pOctDown);
+    pOctUp.setButtonText (juce::String::fromUTF8 ("▲")); pOctDown.setButtonText (juce::String::fromUTF8 ("▼"));
+    pOctUp.setTooltip (T ("Eine Oktave höher (F8, oder das Mausrad über den Tasten)"));
+    pOctDown.setTooltip (T ("Eine Oktave tiefer (F7, oder das Mausrad über den Tasten)"));
+    pOctUp.onClick = [this] { setOctave (octave + 1); };
+    pOctDown.onClick = [this] { setOctave (octave - 1); };
     piano.setBase (octave * 12);
     midiInLbl.setText (T ("MIDI-Eingang"), juce::dontSendNotification);
     midiInLbl.setFont (font (12.5f));
@@ -1584,7 +1594,7 @@ TrackerPanel::~TrackerPanel()
 void TrackerPanel::applyPianoVisibility()
 {
     const bool on = pianoBtn.getToggleState();
-    for (auto* c : std::initializer_list<juce::Component*> { &piano, &midiInBox, &midiInLbl, &advanceBtn }) c->setVisible (on);
+    for (auto* c : std::initializer_list<juce::Component*> { &piano, &midiInBox, &midiInLbl, &advanceBtn, &pOctUp, &pOctDown }) c->setVisible (on);
     if (on) fillMidiDevices();
     updateMidiIn();
     resized();
@@ -2157,6 +2167,11 @@ void TrackerPanel::resized()
         midiInLbl.setBounds (side.removeFromTop (22));
         midiInBox.setBounds (side.removeFromTop (28)); side.removeFromTop (8);
         advanceBtn.setBounds (side.removeFromTop (24));
+        auto oct = pb.removeFromLeft (34);
+        pb.removeFromLeft (6);
+        pOctUp.setBounds (oct.removeFromTop ((oct.getHeight() - 4) / 2));
+        oct.removeFromTop (4);
+        pOctDown.setBounds (oct);
         piano.setBounds (pb);
     }
     const int rightW = juce::jlimit (330, 520, r.getWidth() * 36 / 100);
