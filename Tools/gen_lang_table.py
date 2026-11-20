@@ -542,6 +542,11 @@ ROWS = [
 # ---- tracker recording
 ('Aufnahme: spielt den Tune (oder den markierten Bereich) und schreibt gespielte Tasten der Klaviatur oder des MIDI-Keyboards in die Zeile, die gerade spielt – in die Stimme des Cursors. Mit Wiederholen hörst du das Aufgenommene in der nächsten Runde', 'Record: plays the tune (or the marked area) and writes keys you play on the keyboard or the MIDI keyboard into the row that is playing – in the cursor’s voice. With repeat you hear what you recorded in the next round', 'Enregistrement : joue le morceau (ou la zone marquée) et écrit les touches jouées au clavier ou au clavier MIDI dans la ligne en cours de lecture – dans la voix du curseur. Avec la répétition, vous entendez l’enregistrement au tour suivant'),
 ('Aufnahme läuft: Tasten spielen, die Noten landen in der Stimme %1', 'Recording: play keys, the notes go into voice %1', 'Enregistrement en cours : jouez des touches, les notes vont dans la voix %1'),
+# ---- several tracks per voice
+('Priorität %1', 'Priority %1', 'Priorité %1'),
+('(höchste)', '(highest)', '(la plus haute)'),
+('Priorität', 'Priority', 'Priorité'),
+('Spielen mehrere Spuren dieselbe Stimme, gewinnt bei gleichzeitigen Noten die Spur mit der höheren Priorität; die anderen füllen nur deren Pausen. Die Klänge der Spuren bleiben unterschiedlich (nur im Tracker)', 'When several tracks play the same voice, the track with the higher priority wins where notes sound together; the others only fill its pauses. The tracks keep their own sounds (in the tracker only)', 'Quand plusieurs pistes jouent la même voix, la piste de priorité supérieure l’emporte là où des notes sonnent ensemble ; les autres ne comblent que ses pauses. Les pistes gardent leur propre son (dans le tracker seulement)'),
 ]
 
 def esc(s):

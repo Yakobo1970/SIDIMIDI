@@ -307,7 +307,19 @@ int main (int argc, char** argv)
         // SidTest mid2np <template.prg> <in.mid> <out.sid> [out.np]: MIDI -> NewPlayer tune, exports it and plays it in the emulator
         juce::MemoryBlock tpl;
         if (! juce::File (juce::String::fromUTF8 (argv[2])).loadFileAsData (tpl)) { out ("template not found"); return 1; }
-        auto r = npImportMidi (juce::File (juce::String::fromUTF8 (argv[3])), tpl.getData(), tpl.getSize());
+        // SIDI_PARTS="2,3;4;5": the tracks of the three voices (several per voice, the first has the highest priority)
+        VoiceSources vs = autoVoiceSources();
+        if (const char* ev = std::getenv ("SIDI_PARTS"))
+        {
+            vs = {};
+            const auto voices = juce::StringArray::fromTokens (ev, ";", "");
+            for (int v = 0; v < 3 && v < voices.size(); ++v)
+            {
+                int prio = 0;
+                for (auto& t : juce::StringArray::fromTokens (voices[v], ",", "")) if (t.isNotEmpty()) vs[(size_t) v].push_back ({ t.getIntValue(), 0, prio++ });
+            }
+        }
+        auto r = npImportMidi (juce::File (juce::String::fromUTF8 (argv[3])), tpl.getData(), tpl.getSize(), vs);
         out (r.report);
         if (! r.ok) return 1;
         const auto psid = r.tune.toPsid ("MIDI import", "SIDiMIDI", "");

@@ -291,7 +291,7 @@ public:
     void newTune();
     void openFile();
     void openD64();
-    void importMidi (const juce::File& midi, std::array<int, 3> parts = { { -2, -2, -2 } }, std::array<int, 3> roles = { { 0, 0, 0 } });
+    void importMidi (const juce::File& midi, VoiceSources sources = autoVoiceSources());
     void chooseMidi();
     void saveFile (bool saveAs);
     void exportSid();
@@ -1855,10 +1855,10 @@ void TrackerPanel::chooseMidi()
                          [safe = juce::Component::SafePointer<TrackerPanel> (this)] (const juce::File& f) { if (safe != nullptr) safe->importMidi (f); });
 }
 
-void TrackerPanel::importMidi (const juce::File& midi, std::array<int, 3> parts, std::array<int, 3> roles)
+void TrackerPanel::importMidi (const juce::File& midi, VoiceSources sources)
 {
     stop();
-    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, parts, roles);
+    auto r = npImportMidi (midi, BinaryData::np_v20g4_prg, (size_t) BinaryData::np_v20g4_prgSize, sources);
     if (! r.ok) { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SIDiMIDI", r.report); return; }
     loadTune (r.tune, {});
     titleEd.setText (midi.getFileNameWithoutExtension(), false);
@@ -2033,7 +2033,15 @@ TrackerWindow::TrackerWindow (MainComponent& m)
 
 void TrackerWindow::importMidiFile (const juce::File& midi, std::array<int, 3> parts, std::array<int, 3> roles)
 {
-    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi, parts, roles] { if (safe != nullptr) safe->content->importMidi (midi, parts, roles); });
+    VoiceSources sources;
+    for (size_t v = 0; v < 3; ++v)
+        if (parts[v] != -1) sources[v].push_back ({ parts[v], roles[v], 0 });
+    importMidiFile (midi, sources);
+}
+
+void TrackerWindow::importMidiFile (const juce::File& midi, VoiceSources sources)
+{
+    content->confirmDiscard ([safe = juce::Component::SafePointer<TrackerWindow> (this), midi, sources] { if (safe != nullptr) safe->content->importMidi (midi, sources); });
 }
 
 void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bool play, const juce::String& keys, const juce::File& exportSid)

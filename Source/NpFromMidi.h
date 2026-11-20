@@ -3,6 +3,7 @@
 // pitch sweeps through the arpeggio table), pulse swings, hard restart – and it can be edited in the tracker.
 #pragma once
 #include "NpTune.h"
+#include "VoiceMix.h"
 #include <array>
 
 namespace sm
@@ -13,6 +14,9 @@ struct NpImport
     NpTune tune;
     juce::String report;       // what was done (tempo, voices, chords, sequences …) or why it failed
 };
+
+// several MIDI tracks per voice with priorities (VoiceMix.h); a source with part -2 is the automatic choice for its voice
+NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t templateSize, VoiceSources sources);
 
 // roles: 0 automatic (GM program / channel), 1 lead, 2 bass, 3 pad, 4 drums
 // parts: MIDI tracks for the three voices, as in MidiToSidCoreEngine::ChannelSuggestion::partId(); -2 = automatic

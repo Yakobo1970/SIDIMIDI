@@ -1,5 +1,6 @@
 // SIDiMIDI – tab "MIDI -> SID": open a folder of MIDI files, convert single files to SID with different depths.
 #pragma once
+#include "VoiceMix.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <atomic>
 #include <array>
@@ -42,6 +43,8 @@ public:
     enum class Depth { quick, targeted, roundTrip, tracker };
     void convert (int itemIndex, Depth depth);
     void convertTracks (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip);
+    void convertTracks (int itemIndex, const VoiceSources& sources, bool roundTrip);        // several tracks per voice
+    void convertToTracker (int itemIndex, const VoiceSources& sources);
     void convertToTracker (int itemIndex, const std::array<int, 3>& parts, const std::array<int, 3>& roles);     // parts: MIDI tracks for the three voices (-1 = none); roles as in the targeted conversion
     void playMidi (int itemIndex);
     void playSidResult (int itemIndex);
@@ -81,7 +84,7 @@ private:
     void stopScan();
     void rebuildShown();
     void showRecentMenu();
-    void runConversion (int itemIndex, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip, const juce::File& target);
+    void runConversion (int itemIndex, const VoiceSources& sources, bool roundTrip, const juce::File& target);
     void timerCallback() override;
 
     // TableListBoxModel

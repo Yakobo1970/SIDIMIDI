@@ -171,6 +171,7 @@ public:
         boxWidth = 960; boxHeight = 660;
         voiceOf.assign (tracks.size(), 0);
         roleOf.assign (tracks.size(), 0);
+        prioOf.assign (tracks.size(), 0);
         active.assign (tracks.size(), 0);
         for (int v = 0; v < 3; ++v)
             for (size_t i = 0; i < tracks.size(); ++i)
@@ -247,7 +248,14 @@ public:
 
     // ---- list rows
     int getNumRows() override { return (int) tracks.size(); }
-    int roleWidth() const { return 146; }
+    int roleWidth() const { return 146 + 106; }
+    // does another track play the same voice? Then the priority matters
+    bool shared (size_t row) const
+    {
+        if (voiceOf[row] <= 0) return false;
+        for (size_t i = 0; i < voiceOf.size(); ++i) if (i != row && voiceOf[i] == voiceOf[row]) return true;
+        return false;
+    }
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool) override
     {
         const auto& th = theme();
@@ -290,7 +298,13 @@ public:
     {
         explicit Row (TrackPickPanel& p) : panel (p)
         {
-            addAndMakeVisible (play); addAndMakeVisible (voice); addAndMakeVisible (role);
+            addAndMakeVisible (play); addAndMakeVisible (voice); addAndMakeVisible (role); addAndMakeVisible (prio);
+            prio.addItem (T ("Priorität %1", 1) + " " + T ("(höchste)"), 1);
+            prio.addItem (T ("Priorität %1", 2), 2);
+            prio.addItem (T ("Priorität %1", 3), 3);
+            prio.setTextWhenNothingSelected (T ("Priorität"));
+            prio.setTooltip (T ("Spielen mehrere Spuren dieselbe Stimme, gewinnt bei gleichzeitigen Noten die Spur mit der höheren Priorität; die anderen füllen nur deren Pausen. Die Klänge der Spuren bleiben unterschiedlich (nur im Tracker)"));
+            prio.onChange = [this] { panel.prioOf[(size_t) row] = prio.getSelectedId() - 1; };
             play.setButtonText (juce::String::fromUTF8 ("▶"));
             play.setTooltip (T ("Diese Spur ein- oder ausschalten (hörbar = grün); mehrere Spuren gleichzeitig sind möglich"));
             voice.addItem (juce::String::fromUTF8 ("—"), 1);
@@ -300,8 +314,14 @@ public:
             voice.onChange = [this]
             {
                 const int v = voice.getSelectedId() - 1;
-                if (v > 0) for (size_t i = 0; i < panel.voiceOf.size(); ++i) if (panel.voiceOf[i] == v) panel.voiceOf[i] = 0;
                 panel.voiceOf[(size_t) row] = v;
+                if (panel.shared ((size_t) row))      // a new second track on a voice comes after the others
+                {
+                    int worst = -1;
+                    for (size_t i = 0; i < panel.voiceOf.size(); ++i) if (i != (size_t) row && panel.voiceOf[i] == v) worst = std::max (worst, panel.prioOf[i]);
+                    panel.prioOf[(size_t) row] = std::min (2, worst + 1);
+                }
+                else panel.prioOf[(size_t) row] = 0;
                 panel.list.updateContent();
                 panel.list.repaint();
                 panel.updateButton();
@@ -313,6 +333,9 @@ public:
             row = r;
             voice.setSelectedId (panel.voiceOf[(size_t) r] + 1, juce::dontSendNotification);
             role.setSelectedId (panel.roleOf[(size_t) r] + 1, juce::dontSendNotification);
+            const bool sh = panel.shared ((size_t) r);
+            prio.setEnabled (sh);
+            prio.setSelectedId (sh ? panel.prioOf[(size_t) r] + 1 : 0, juce::dontSendNotification);
             if (panel.active[(size_t) r] != 0)      // listened to: the key is green
             {
                 play.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2f9e44));
@@ -330,12 +353,13 @@ public:
             auto r = getLocalBounds().reduced (2, 3);
             play.setBounds (r.removeFromLeft (38)); r.removeFromLeft (4);
             role.setBounds (r.removeFromRight (140)); r.removeFromRight (6);
+            prio.setBounds (r.removeFromRight (100)); r.removeFromRight (6);
             voice.setBounds (r.removeFromRight (110));
         }
         TrackPickPanel& panel;
         int row = 0;
         juce::TextButton play;
-        juce::ComboBox voice, role;
+        juce::ComboBox voice, role, prio;
     };
 
     // ---- preview: tracks are switched on and off one by one; they sound together
@@ -418,12 +442,12 @@ public:
 
     void run()
     {
-        std::array<int, 3> trackIdx { -1, -1, -1 }, roles { 0, 0, 0 };
+        VoiceSources sources;
         for (size_t i = 0; i < tracks.size(); ++i)
-            if (voiceOf[i] > 0) { trackIdx[(size_t) voiceOf[i] - 1] = tracks[i].partId(); roles[(size_t) voiceOf[i] - 1] = roleOf[i]; }
+            if (voiceOf[i] > 0) sources[(size_t) voiceOf[i] - 1].push_back ({ tracks[i].partId(), roleOf[i], shared (i) ? prioOf[i] : 0 });
         stopAll();
-        if (toTracker) tab.convertToTracker (itemIndex, trackIdx, roles);
-        else tab.convertTracks (itemIndex, trackIdx, roles, false);
+        if (toTracker) tab.convertToTracker (itemIndex, sources);
+        else tab.convertTracks (itemIndex, sources, false);
         closeLater();
     }
 
@@ -482,7 +506,7 @@ private:
     int itemIndex;
     std::vector<Track> tracks;
     bool toTracker = false;
-    std::vector<int> voiceOf, roleOf;
+    std::vector<int> voiceOf, roleOf, prioOf;      // prioOf: 0 = highest
     std::vector<char> active;
     std::vector<juce::Image> minis;
     double total = 1.0;
@@ -911,13 +935,29 @@ void MidiTab::convert (int idx, Depth depth)
 
 void MidiTab::convertToTracker (int idx, const std::array<int, 3>& parts, const std::array<int, 3>& roles)
 {
+    VoiceSources sources;
+    for (size_t v = 0; v < 3; ++v)
+        if (parts[v] != -1) sources[v].push_back ({ parts[v], roles[v], 0 });
+    convertToTracker (idx, sources);
+}
+
+void MidiTab::convertToTracker (int idx, const VoiceSources& sources)
+{
     const auto* m = item (idx);
     if (m == nullptr) return;
     main.openTracker();
-    if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file, parts, roles);
+    if (auto* tw = main.trackerWindow()) tw->importMidiFile (m->file, sources);
 }
 
 void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip)
+{
+    VoiceSources sources;
+    for (size_t v = 0; v < 3; ++v)
+        if (tracks[v] >= 0) sources[v].push_back ({ tracks[v], roles[v], 0 });
+    convertTracks (idx, sources, roundTrip);
+}
+
+void MidiTab::convertTracks (int idx, const VoiceSources& sources, bool roundTrip)
 {
     // pressing a conversion depth opens the save dialog (suggestion: the opened MIDI folder); the conversion then runs at once
     const auto* m = item (idx);
@@ -925,10 +965,10 @@ void MidiTab::convertTracks (int idx, const std::array<int, 3>& tracks, const st
     const auto suggested = (folder.isDirectory() ? folder : m->file.getParentDirectory())
                                .getChildFile (juce::File::createLegalFileName (m->file.getFileNameWithoutExtension()) + ".sid");
     juce::Component::SafePointer<MidiTab> safe (this);
-    main.chooseSaveFile (T ("SID-Datei speichern unter"), suggested, "*.sid", [safe, idx, tracks, roles, roundTrip] (const juce::File& chosen)
+    main.chooseSaveFile (T ("SID-Datei speichern unter"), suggested, "*.sid", [safe, idx, sources, roundTrip] (const juce::File& chosen)
     {
         if (safe == nullptr) return;
-        safe->runConversion (idx, tracks, roles, roundTrip, chosen.hasFileExtension ("sid") ? chosen : chosen.withFileExtension ("sid"));
+        safe->runConversion (idx, sources, roundTrip, chosen.hasFileExtension ("sid") ? chosen : chosen.withFileExtension ("sid"));
     });
 }
 
@@ -943,7 +983,7 @@ void MidiTab::rememberResult (const juce::File& midi, const juce::File& sid)
     main.notifySettings();
 }
 
-void MidiTab::runConversion (int idx, const std::array<int, 3>& tracks, const std::array<int, 3>& roles, bool roundTrip, const juce::File& target)
+void MidiTab::runConversion (int idx, const VoiceSources& sources, bool roundTrip, const juce::File& target)
 {
     const auto* m = item (idx);
     if (m == nullptr) return;
@@ -954,14 +994,12 @@ void MidiTab::runConversion (int idx, const std::array<int, 3>& tracks, const st
     }
     const auto src = m->file;
     main.setStatus (T ("Konvertiere %1 …", src.getFileName()));
-    std::array<MidiToSidCoreEngine::VoiceRole, 3> vr;
-    for (size_t i = 0; i < 3; ++i) vr[i] = (MidiToSidCoreEngine::VoiceRole) juce::jlimit (0, 4, roles[i]);
     juce::Component::SafePointer<MidiTab> safe (this);
-    main.jobs().addJob ([safe, src, target, tracks, roundTrip, vr, idx]
+    main.jobs().addJob ([safe, src, target, sources, roundTrip, idx]
     {
         juce::String log;
         target.getParentDirectory().createDirectory();
-        const bool ok = MidiToSidCoreEngine::convertMidiToSidFile (src, target, tracks, roundTrip, log, vr);
+        const bool ok = MidiToSidCoreEngine::convertMidiToSidFile (src, target, sources, roundTrip, log);
         juce::MessageManager::callAsync ([safe, ok, target, log, idx]
         {
             if (safe == nullptr) return;

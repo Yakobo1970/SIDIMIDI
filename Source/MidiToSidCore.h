@@ -1,4 +1,5 @@
 #pragma once
+#include "VoiceMix.h"
 
 #include <JuceHeader.h>
 #include "EmbeddedMiniplayer.h"
@@ -160,6 +161,22 @@ public:
         juce::String& logOutput,
         std::array<VoiceRole, 3> voiceRoles = { VoiceRole::Auto, VoiceRole::Auto, VoiceRole::Auto })
     {
+        if (useRoundTrip)
+            trackIndices = { 1, 2, 3 };
+        sm::VoiceSources sources;
+        for (size_t v = 0; v < 3; ++v)
+            if (trackIndices[v] >= 0) sources[v].push_back(sm::MidiVoiceSource{ trackIndices[v], (int)voiceRoles[v], 0 });
+        return convertMidiToSidFile(midiFile, targetSidFile, sources, useRoundTrip, logOutput);
+    }
+
+    // Several tracks can play one voice: where they sound together, the one with the higher priority wins and the
+    // others fill its pauses (see mergeByPriority). The sound of the voice is that of its first (highest) track.
+    static bool convertMidiToSidFile(const juce::File& midiFile,
+        const juce::File& targetSidFile,
+        sm::VoiceSources sources,
+        bool /*useRoundTrip*/,
+        juce::String& logOutput)
+    {
         juce::File toolsDir, playerSourceFile;
         if (!locateMiniplayerFiles(toolsDir, playerSourceFile, logOutput))
             return false;
@@ -177,63 +194,70 @@ public:
             return false;
         }
 
-        if (useRoundTrip)
-            trackIndices = { 1, 2, 3 };
-
         parsedFile.convertTimestampTicksToSeconds();
 
-        // Pro Stimme wird NUR die eigene Spur ausgewertet (kein Zusammenmischen mehr über
-        // MIDI-Kanal): DAW-Exporte legen jede Spur als eigenen MTrk-Chunk an, belassen dabei
-        // aber häufig alle Spuren auf demselben Kanal (z.B. Kanal 1) - eine Kanal-basierte
-        // Auswahl würde dort mehrere Spuren ununterscheidbar zusammenwerfen.
+        // Pro Quelle wird NUR die eigene Spur ausgewertet (kein Zusammenmischen ueber MIDI-Kanal): DAW-Exporte legen
+        // jede Spur als eigenen MTrk-Chunk an, belassen dabei aber haeufig alle Spuren auf demselben Kanal.
         std::array<std::vector<NoteEvent>, 3> rawNotes;
         std::array<int, 3> voiceProgram = { 0, 0, 0 };
         std::array<bool, 3> voiceHasProgram = { false, false, false };
         std::array<int, 3> voiceChannel = { -1, -1, -1 };
-        std::array<const juce::MidiMessageSequence*, 3> voiceTrack = { nullptr, nullptr, nullptr };
-        std::array<int, 3> voiceChannelFilter = { 0, 0, 0 };
+        std::array<VoiceRole, 3> voiceRoles = { VoiceRole::Auto, VoiceRole::Auto, VoiceRole::Auto };
 
         for (int v = 0; v < 3; ++v)
         {
-            // Kennung = Spurindex (Bit 0-15) + optional Kanalfilter (Bit 16-20), siehe ChannelSuggestion::partId()
-            const int part = trackIndices[(size_t)v];
-            int idx = part < 0 ? -1 : (part & 0xFFFF);
-            const int chanFilter = part < 0 ? 0 : ((part >> 16) & 0x1F);
-            voiceChannelFilter[(size_t)v] = chanFilter;
-            auto* track = (idx >= 0 && idx < parsedFile.getNumTracks()) ? parsedFile.getTrack(idx) : nullptr;
-            voiceTrack[(size_t)v] = track;
-            if (track == nullptr) continue;
-
-            for (int i = 0; i < track->getNumEvents(); ++i)
+            auto srcs = sources[(size_t)v];
+            std::stable_sort(srcs.begin(), srcs.end(), [](const sm::MidiVoiceSource& x, const sm::MidiVoiceSource& y) { return x.priority < y.priority; });
+            std::vector<std::vector<NoteEvent>> levels;
+            for (const auto& src : srcs)
             {
-                auto* ev = track->getEventPointer(i);
-                if (ev == nullptr) continue;
-                if (chanFilter > 0 && ev->message.getChannel() != chanFilter) continue;
+                // Kennung = Spurindex (Bit 0-15) + optional Kanalfilter (Bit 16-20), siehe ChannelSuggestion::partId()
+                const int part = src.part;
+                const int idx = part < 0 ? -1 : (part & 0xFFFF);
+                const int chanFilter = part < 0 ? 0 : ((part >> 16) & 0x1F);
+                auto* track = (idx >= 0 && idx < parsedFile.getNumTracks()) ? parsedFile.getTrack(idx) : nullptr;
+                if (track == nullptr) continue;
 
-                if (ev->message.isProgramChange() && !voiceHasProgram[(size_t)v])
+                std::vector<NoteEvent> notes;
+                int program = 0, channel = -1;
+                bool hasProgram = false;
+                for (int i = 0; i < track->getNumEvents(); ++i)
                 {
-                    voiceProgram[(size_t)v] = ev->message.getProgramChangeNumber();
-                    voiceHasProgram[(size_t)v] = true;
+                    auto* ev = track->getEventPointer(i);
+                    if (ev == nullptr) continue;
+                    if (chanFilter > 0 && ev->message.getChannel() != chanFilter) continue;
+
+                    if (ev->message.isProgramChange() && !hasProgram)
+                    {
+                        program = ev->message.getProgramChangeNumber();
+                        hasProgram = true;
+                    }
+                    else if (ev->message.isNoteOn())
+                    {
+                        if (channel < 0)
+                            channel = ev->message.getChannel();
+                        NoteEvent n;
+                        n.startSeconds = ev->message.getTimeStamp();
+                        n.endSeconds = n.startSeconds + 0.05; // vorlaeufig, wird unten per Note-Off korrigiert
+                        n.pitch = ev->message.getNoteNumber();
+                        notes.push_back(n);
+                    }
                 }
-                else if (ev->message.isNoteOn())
+                // Note-Off-Zeiten nachtragen: "letzte offene Note derselben Tonhoehe in dieser Spur"
+                resolveNoteOffs(*track, notes, chanFilter);
+                if (notes.empty()) continue;
+                if (levels.empty())      // the voice sounds like its first track
                 {
-                    if (voiceChannel[(size_t)v] < 0)
-                        voiceChannel[(size_t)v] = ev->message.getChannel();
-                    NoteEvent n;
-                    n.startSeconds = ev->message.getTimeStamp();
-                    n.endSeconds = n.startSeconds + 0.05; // vorläufig, wird unten per Note-Off korrigiert
-                    n.pitch = ev->message.getNoteNumber();
-                    rawNotes[(size_t)v].push_back(n);
+                    voiceProgram[(size_t)v] = program;
+                    voiceHasProgram[(size_t)v] = hasProgram;
+                    voiceChannel[(size_t)v] = channel;
+                    voiceRoles[(size_t)v] = (VoiceRole)juce::jlimit(0, 4, src.role);
                 }
+                levels.push_back(std::move(notes));
             }
+            rawNotes[(size_t)v] = levels.size() <= 1 ? (levels.empty() ? std::vector<NoteEvent>() : levels[0])
+                                                     : sm::mergeByPriority(levels, &NoteEvent::startSeconds, &NoteEvent::endSeconds);
         }
-
-        // Note-Off-Zeiten nachtragen: einfache Zuordnung "letzte offene Note derselben
-        // Tonhöhe in dieser Spur" - ausreichend, da monophonize() ohnehin gleich danach
-        // überlappende Noten auf eine einzige Linie reduziert.
-        for (int v = 0; v < 3; ++v)
-            if (voiceTrack[(size_t)v] != nullptr)
-                resolveNoteOffs(*voiceTrack[(size_t)v], rawNotes[(size_t)v], voiceChannelFilter[(size_t)v]);
 
         juce::String title = midiFile.getFileNameWithoutExtension();
 
@@ -257,8 +281,7 @@ public:
         for (auto& vn : voiceNotes) totalNotes += (int)vn.size();
         if (totalNotes == 0)
         {
-            logOutput += juce::String(juce::CharPointer_UTF8("FEHLER: Keine Noten auf den gew\xc3\xa4hlten Spuren (")) + juce::String(trackIndices[0])
-                + "/" + juce::String(trackIndices[1]) + "/" + juce::String(trackIndices[2]) + ") gefunden.\n";
+            logOutput += juce::String(juce::CharPointer_UTF8("FEHLER: Keine Noten auf den gew\xc3\xa4hlten Spuren gefunden.\n"));
             return false;
         }
 

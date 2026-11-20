@@ -1,5 +1,6 @@
 #include "NpFromMidi.h"
 #include "MidiToSidCore.h"
+#include "VoiceMix.h"
 #include "Lang.h"
 #include <map>
 #include <set>
@@ -12,7 +13,7 @@ namespace
 {
 constexpr double kFps = 50.1245;
 
-struct InNote { double start = 0, end = 0; int pitch = 60; };
+struct InNote { double start = 0, end = 0; int pitch = 60; int src = 0; };
 
 struct InVoice
 {
@@ -23,6 +24,15 @@ struct InVoice
     juce::String label;
     bool drums = false;
     int role = 0;              // 0 automatic, 1 lead, 2 bass, 3 pad, 4 drums
+};
+
+// one voice: its tracks (each with its own sound) and their notes, merged by priority
+struct VoiceMix
+{
+    std::vector<InVoice> srcs;
+    std::vector<InNote> notes;      // src = index into srcs
+    juce::String label;
+    bool allDrums() const { if (srcs.empty()) return false; for (auto& s : srcs) if (! s.drums) return false; return true; }
 };
 
 enum { wTri = 0x11, wSaw = 0x21, wPulse = 0x41, wNoise = 0x81 };
@@ -143,18 +153,18 @@ int noteOf (int pitch)
 }
 
 // ---- one melodic voice -> rows
-std::vector<NpRow> buildMelodic (const InVoice& v, double rowSec, int totalRows, Builder& b, int& chordCount)
+std::vector<NpRow> buildMelodic (const VoiceMix& v, double rowSec, int totalRows, Builder& b, int& chordCount)
 {
     std::vector<NpRow> rows ((size_t) totalRows);
-    const Timbre tb = pickTimbre (v);
-    struct Slot { double start, end; std::vector<int> pitches; };
+    struct Slot { double start, end; std::vector<int> pitches; int src; bool drum; };
     auto notes = v.notes;
     std::sort (notes.begin(), notes.end(), [] (const InNote& a, const InNote& c) { return a.start < c.start; });
     std::vector<Slot> slots;
     for (auto& n : notes)
     {
-        if (! slots.empty() && n.start - slots.back().start < rowSec * 0.6) { slots.back().pitches.push_back (n.pitch); slots.back().end = std::max (slots.back().end, n.end); }
-        else slots.push_back ({ n.start, n.end, { n.pitch } });
+        const bool drum = v.srcs[(size_t) n.src].drums;
+        if (! slots.empty() && ! drum && ! slots.back().drum && slots.back().src == n.src && n.start - slots.back().start < rowSec * 0.6) { slots.back().pitches.push_back (n.pitch); slots.back().end = std::max (slots.back().end, n.end); }
+        else slots.push_back ({ n.start, n.end, { n.pitch }, n.src, drum });
     }
     for (size_t i = 0; i < slots.size(); ++i)
     {
@@ -162,6 +172,8 @@ std::vector<NpRow> buildMelodic (const InVoice& v, double rowSec, int totalRows,
         int nextSr = totalRows;
         if (i + 1 < slots.size()) nextSr = (int) std::lround (slots[i + 1].start / rowSec);
         if (nextSr <= sr || sr < 0 || sr >= totalRows) continue;                       // two slots on one row: the later one wins
+        if (slots[i].drum) { rows[(size_t) sr] = { (juce::uint8) (0xa0 + b.drum (drumKindOf (slots[i].pitches.front()))), 48 }; continue; }
+        const Timbre tb = pickTimbre (v.srcs[(size_t) slots[i].src]);
         const int er = std::min (nextSr, std::max (sr + 1, (int) std::lround (slots[i].end / rowSec)));
         auto p = slots[i].pitches;
         std::sort (p.begin(), p.end());
@@ -185,7 +197,7 @@ std::vector<NpRow> buildMelodic (const InVoice& v, double rowSec, int totalRows,
     return rows;
 }
 
-std::vector<NpRow> buildDrums (const InVoice& v, double rowSec, int totalRows, Builder& b, int& hits)
+std::vector<NpRow> buildDrums (const VoiceMix& v, double rowSec, int totalRows, Builder& b, int& hits)
 {
     std::vector<NpRow> rows ((size_t) totalRows);
     std::vector<int> prio ((size_t) totalRows, 0);
@@ -205,6 +217,14 @@ std::vector<NpRow> buildDrums (const InVoice& v, double rowSec, int totalRows, B
 
 NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t templateSize, std::array<int, 3> parts, std::array<int, 3> roles)
 {
+    VoiceSources sources;
+    for (size_t v = 0; v < 3; ++v)
+        if (parts[v] != -1) sources[v].push_back ({ parts[v], roles[v], 0 });
+    return npImportMidi (midi, templateData, templateSize, sources);
+}
+
+NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t templateSize, VoiceSources sources)
+{
     NpImport out;
     juce::String err;
     if (! out.tune.loadPrg (templateData, templateSize, err)) { out.report = err; return out; }
@@ -214,18 +234,16 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     bool roundTrip = false;
     std::array<MidiToSidCoreEngine::ChannelSuggestion, 3> sug;
     if (! MidiToSidCoreEngine::analyzeMidiFile (midi, roundTrip, sug, log)) { out.report = T ("Die MIDI-Datei lässt sich nicht analysieren"); return out; }
-    std::array<juce::String, 3> labels;
+    std::vector<MidiToSidCoreEngine::ChannelSuggestion> all;
+    { juce::String l2; MidiToSidCoreEngine::listAllTracks (midi, all, l2); }
+    auto labelOf = [&] (int part, int v) -> juce::String
     {
-        std::vector<MidiToSidCoreEngine::ChannelSuggestion> all;
-        juce::String l2;
-        MidiToSidCoreEngine::listAllTracks (midi, all, l2);
-        for (int v = 0; v < 3; ++v)
-        {
-            if (parts[(size_t) v] == -2) parts[(size_t) v] = sug[(size_t) v].channel > 0 || sug[(size_t) v].trackIndex >= 0 ? sug[(size_t) v].partId() : -1;
-            labels[(size_t) v] = sug[(size_t) v].label;
-            for (auto& c : all) if (parts[(size_t) v] >= 0 && c.partId() == parts[(size_t) v]) labels[(size_t) v] = c.label;
-        }
-    }
+        for (auto& c : all) if (c.partId() == part) return c.label;
+        return sug[(size_t) v].label;
+    };
+    for (int v = 0; v < 3; ++v)
+        for (auto& s : sources[(size_t) v])
+            if (s.part == -2) s.part = sug[(size_t) v].channel > 0 || sug[(size_t) v].trackIndex >= 0 ? sug[(size_t) v].partId() : -1;
 
     juce::FileInputStream in (midi);
     juce::MidiFile mf;
@@ -261,38 +279,51 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     const double rowSec = sixteenth;
     const double tempoError = (framesPerRow / kFps) / sixteenth - 1.0;      // > 0: the tune plays slower than the MIDI file
 
-    std::array<InVoice, 3> voices;
+    std::array<VoiceMix, 3> voices;
     for (int v = 0; v < 3; ++v)
     {
-        auto& iv = voices[(size_t) v];
-        const int part = parts[(size_t) v];
-        iv.label = part >= 0 ? labels[(size_t) v] : juce::String();
-        if (part < 0) continue;
-        const int idx = part & 0xffff, chan = (part >> 16) & 0x1f;
-        if (idx >= mf.getNumTracks()) continue;
-        juce::MidiMessageSequence seq (*mf.getTrack (idx));
-        seq.updateMatchedPairs();
-        double sum = 0;
-        for (int i = 0; i < seq.getNumEvents(); ++i)
+        auto& vm = voices[(size_t) v];
+        auto srcs = sources[(size_t) v];
+        std::stable_sort (srcs.begin(), srcs.end(), [] (const MidiVoiceSource& x, const MidiVoiceSource& y) { return x.priority < y.priority; });
+        std::vector<std::vector<InNote>> levels;
+        for (auto& sc : srcs)
         {
-            auto* ev = seq.getEventPointer (i);
-            const auto& m = ev->message;
-            if (chan > 0 && m.getChannel() != chan) continue;
-            if (m.isProgramChange() && iv.program < 0) iv.program = m.getProgramChangeNumber();
-            else if (m.isNoteOn() && m.getVelocity() > 0)
+            if (sc.part < 0) continue;
+            const int idx = sc.part & 0xffff, chan = (sc.part >> 16) & 0x1f;
+            if (idx >= mf.getNumTracks()) continue;
+            InVoice iv;
+            iv.label = labelOf (sc.part, v);
+            juce::MidiMessageSequence seq (*mf.getTrack (idx));
+            seq.updateMatchedPairs();
+            double sum = 0;
+            for (int i = 0; i < seq.getNumEvents(); ++i)
             {
-                if (iv.channel < 0) iv.channel = m.getChannel();
-                InNote n;
-                n.start = m.getTimeStamp();
-                n.end = ev->noteOffObject != nullptr ? ev->noteOffObject->message.getTimeStamp() : n.start + 0.25;
-                n.pitch = m.getNoteNumber();
-                iv.notes.push_back (n);
-                sum += n.pitch;
+                auto* ev = seq.getEventPointer (i);
+                const auto& m = ev->message;
+                if (chan > 0 && m.getChannel() != chan) continue;
+                if (m.isProgramChange() && iv.program < 0) iv.program = m.getProgramChangeNumber();
+                else if (m.isNoteOn() && m.getVelocity() > 0)
+                {
+                    if (iv.channel < 0) iv.channel = m.getChannel();
+                    InNote n;
+                    n.start = m.getTimeStamp();
+                    n.end = ev->noteOffObject != nullptr ? ev->noteOffObject->message.getTimeStamp() : n.start + 0.25;
+                    n.pitch = m.getNoteNumber();
+                    n.src = (int) vm.srcs.size();
+                    iv.notes.push_back (n);
+                    sum += n.pitch;
+                }
             }
+            if (iv.notes.empty()) continue;
+            iv.avgPitch = sum / (double) iv.notes.size();
+            iv.role = juce::jlimit (0, 4, sc.role);
+            iv.drums = iv.role == 4 || (iv.role == 0 && iv.channel == 10);
+            levels.push_back (iv.notes);
+            if (vm.label.isNotEmpty()) vm.label << " + ";
+            vm.label << iv.label;
+            vm.srcs.push_back (std::move (iv));
         }
-        if (! iv.notes.empty()) iv.avgPitch = sum / (double) iv.notes.size();
-        iv.role = juce::jlimit (0, 4, roles[(size_t) v]);
-        iv.drums = iv.role == 4 || (iv.role == 0 && iv.channel == 10);
+        vm.notes = levels.size() <= 1 ? (levels.empty() ? std::vector<InNote>() : levels[0]) : mergeByPriority (levels, &InNote::start, &InNote::end);
     }
 
     double endTime = 0, firstStart = 1e9;
@@ -313,16 +344,16 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     std::array<std::vector<NpRow>, 3> rows;
     int chords = 0, hits = 0;
     // sounds that every tune needs come first (drum kit, one instrument per timbre): chord shapes use the slots that are left
-    for (auto& v : voices)
-    {
-        if (v.notes.empty()) continue;
-        if (v.drums) for (auto& n : v.notes) b.drum (drumKindOf (n.pitch));
-        else b.single (pickTimbre (v));
-    }
+    for (auto& vm : voices)
+        for (size_t si = 0; si < vm.srcs.size(); ++si)
+        {
+            if (vm.srcs[si].drums) { for (auto& n : vm.notes) if (n.src == (int) si) b.drum (drumKindOf (n.pitch)); }
+            else b.single (pickTimbre (vm.srcs[si]));
+        }
     for (int v = 0; v < 3; ++v)
     {
         if (voices[(size_t) v].notes.empty()) { rows[(size_t) v].assign ((size_t) totalRows, NpRow()); continue; }
-        rows[(size_t) v] = voices[(size_t) v].drums ? buildDrums (voices[(size_t) v], rowSec, totalRows, b, hits)
+        rows[(size_t) v] = voices[(size_t) v].allDrums() ? buildDrums (voices[(size_t) v], rowSec, totalRows, b, hits)
                                                     : buildMelodic (voices[(size_t) v], rowSec, totalRows, b, chords);
     }
 
@@ -389,7 +420,7 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     r << T ("Abweichung vom MIDI-Tempo: %1 % (Rasterung auf ganze Frames)", juce::String (tempoError * 100.0, 1)) << "\n";
     for (int v = 0; v < 3; ++v)
         r << T ("Stimme %1: %2", v + 1, voices[(size_t) v].label.isNotEmpty() ? voices[(size_t) v].label : T ("leer"))
-          << (voices[(size_t) v].drums ? U (" – ") + T ("Schlagzeug") : juce::String()) << "\n";
+          << (voices[(size_t) v].allDrums() ? U (" – ") + T ("Schlagzeug") : juce::String()) << "\n";
     r << T ("%1 Akkorde als Arpeggio, %2 Schlagzeug-Anschläge, %3 Instrumente, %4 Sequenzen", chords, hits, b.nextIns - 1, used);
     if (rowsKept < totalRows) r << "\n" << T ("Der Tune war zu lang für 112 Sequenzen und wurde nach %1 Zeilen gekürzt", rowsKept);
     if (b.overflowIns) r << "\n" << T ("Es gibt mehr als 31 Klangvarianten: die übrigen bekamen das erste Instrument");
