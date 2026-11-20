@@ -199,6 +199,8 @@ public:
         if (const char* test = std::getenv ("SIDI_PICK_PRESET"); test != nullptr && ! presets.empty())      // test only: preset index for track 0
             presetOf[0] = juce::String (test).getIntValue();
         normalizePrio();
+        for (size_t i = 0; i < tracks.size(); ++i)         // drums that were recognised: role drums, in the tracker the first kit
+            if (voiceOf[i] > 0 && tracks[i].drums) { roleOf[i] = 4; if (toTracker && ! kits.empty()) kitOf[i] = 0; }
         buildMinis();
         list.setModel (this);
         list.setRowHeight (34);

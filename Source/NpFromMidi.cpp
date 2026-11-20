@@ -13,6 +13,7 @@ namespace sm
 {
 namespace
 {
+juce::String hex2 (int v) { return juce::String::toHexString (v & 0xff).paddedLeft ('0', 2).toUpperCase(); }
 constexpr double kFps = 50.1245;
 
 struct InNote { double start = 0, end = 0; int pitch = 60; int src = 0; };
@@ -267,6 +268,11 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     if (! MidiToSidCoreEngine::analyzeMidiFile (midi, roundTrip, sug, log)) { out.report = T ("Die MIDI-Datei lässt sich nicht analysieren"); return out; }
     std::vector<MidiToSidCoreEngine::ChannelSuggestion> all;
     { juce::String l2; MidiToSidCoreEngine::listAllTracks (midi, all, l2); }
+    auto drumsOf = [&] (int part, int channel)
+    {
+        for (auto& c : all) if (c.partId() == part) return c.drums;
+        return channel == 10;
+    };
     auto labelOf = [&] (int part, int v) -> juce::String
     {
         for (auto& c : all) if (c.partId() == part) return c.label;
@@ -348,7 +354,7 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
             if (iv.notes.empty()) continue;
             iv.avgPitch = sum / (double) iv.notes.size();
             iv.role = juce::jlimit (0, 4, sc.role);
-            iv.drums = iv.role == 4 || (iv.role == 0 && iv.channel == 10);
+            iv.drums = iv.role == 4 || (iv.role == 0 && drumsOf (sc.part, iv.channel));
             if (! sc.kit.empty())
             {
                 DrumKit dk;
@@ -397,10 +403,12 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
         for (size_t si = 0; si < vm.srcs.size(); ++si)
         {
             if (vm.srcs[si].preset != nullptr) b.preset (*vm.srcs[si].preset);
-            else if (vm.srcs[si].drums)
+            else if (vm.srcs[si].drums)       // the drum instruments come as one block, in the order of the GM kinds (kick, snare, tom, cymbal, hi-hats)
             {
-                for (auto& n : vm.notes)
-                    if (n.src == (int) si) { if (vm.srcs[si].kit != nullptr) b.kitDrum (*vm.srcs[si].kit, drumKindOf (n.pitch)); else b.drum (drumKindOf (n.pitch)); }
+                std::set<int> kinds;
+                for (auto& n : vm.notes) if (n.src == (int) si) kinds.insert (drumKindOf (n.pitch));
+                if (vm.srcs[si].kit != nullptr) for (int k = 0; k < kNumDrumKinds; ++k) kinds.insert (k);
+                for (int k : kinds) { if (vm.srcs[si].kit != nullptr) b.kitDrum (*vm.srcs[si].kit, k); else b.drum (k); }
             }
             else b.single (pickTimbre (vm.srcs[si]));
         }
@@ -475,6 +483,18 @@ NpImport npImportMidi (const juce::File& midi, const void* templateData, size_t 
     for (int v = 0; v < 3; ++v)
         r << juce::String ("OSC") + juce::String (v + 1) + ": " + (voices[(size_t) v].label.isNotEmpty() ? voices[(size_t) v].label : T ("leer"))
           << (voices[(size_t) v].allDrums() ? U (" – ") + T ("Schlagzeug") : juce::String()) << "\n";
+    for (int v = 0; v < 3; ++v)           // where the drums went: one instrument per kind of drum
+        for (size_t si = 0; si < voices[(size_t) v].srcs.size(); ++si)
+        {
+            const auto& sc = voices[(size_t) v].srcs[si];
+            if (! sc.drums) continue;
+            std::set<int> kinds;
+            for (auto& n : voices[(size_t) v].notes) if (n.src == (int) si) kinds.insert (drumKindOf (n.pitch));
+            if (sc.kit != nullptr) for (int k = 0; k < kNumDrumKinds; ++k) kinds.insert (k);
+            juce::String line;
+            for (int k : kinds) line << (line.isEmpty() ? "" : ", ") << T (InstrumentPool::kDrumKinds[k]) << " I" << hex2 (sc.kit != nullptr ? b.kitDrum (*sc.kit, k) : b.drum (k));
+            r << T ("Schlagzeug auf OSC%1: %2", v + 1, line) << "\n";
+        }
     r << T ("%1 Akkorde als Arpeggio, %2 Schlagzeug-Anschläge, %3 Instrumente, %4 Sequenzen", chords, hits, b.nextIns - 1, used);
     if (rowsKept < totalRows) r << "\n" << T ("Der Tune war zu lang für 112 Sequenzen und wurde nach %1 Zeilen gekürzt", rowsKept);
     if (b.overflowIns) r << "\n" << T ("Es gibt mehr als 31 Klangvarianten: die übrigen bekamen das erste Instrument");

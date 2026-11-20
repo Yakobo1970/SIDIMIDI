@@ -597,6 +597,7 @@ const Row kRows[] = {
     { "Hi-Hat zu", "Hi-hat closed", "Charleston fermé" },
     { "Hi-Hat offen", "Hi-hat open", "Charleston ouvert" },
     { "Drum-Kit „%1“ gespeichert", "Drum kit “%1” saved", "Kit de batterie « %1 » enregistré" },
+    { "Schlagzeug auf OSC%1: %2", "Drums on OSC%1: %2", "Batterie sur OSC%1 : %2" },
     // ---- table end
 };
 

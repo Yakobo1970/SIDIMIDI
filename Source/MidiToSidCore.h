@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include "EmbeddedMiniplayer.h"
 #include <vector>
+#include <map>
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -54,6 +55,7 @@ public:
         // einer Spur) und manche Exporte legen mehrere Stimmen auf verschiedene Kanäle derselben Spur -
         // diese lassen sich nur mit Kanalfilter als getrennte SID-Stimmen wählen.
         int channelFilter = 0;
+        bool drums = false;    // Schlagzeug: Kanal 10, der Spurname (Drums, Kick, Snare ...) oder das Notenbild (GM-Drum-Noten, kurz, wiederholt)
         // Kennung für convertMidiToSidFile(): Spurindex, bei Kanalfilter zusätzlich der Kanal in Bit 16-20
         int partId() const { return trackIndex | (channelFilter << 16); }
     };
@@ -99,7 +101,7 @@ public:
         // eine der drei Stimmen (als Voice 3) - die übrigen zwei gehen an die notenreichsten
         // Melodiestimmen, tiefste = Voice 1. Sonst: die drei notenreichsten, nach Tonlage sortiert.
         {
-            auto isDrums = [](const ChannelSuggestion& c) { return c.channel == 10; };
+            auto isDrums = [](const ChannelSuggestion& c) { return c.drums; };
             std::vector<ChannelSuggestion> melodic, drums;
             for (auto& c : ranked) (isDrums(c) ? drums : melodic).push_back(c);
             if (!drums.empty() && melodic.size() >= 2)
@@ -322,6 +324,28 @@ private:
         return true;
     }
 
+    // Schlagzeug erkennen, wo sich ein MIDI nicht an "Kanal 10" haelt (viele neuere Dateien: jede Spur ein Drum-VST): am Spurnamen
+    // oder am Notenbild - fast nur GM-Drum-Noten (35-81), wenige verschiedene Toene, kurze Noten, Kick und Snare / Hi-Hat dabei.
+    static bool looksLikeDrums(const juce::String& rawName, int noteCount, const std::map<int, int>& pitches, std::vector<double> durations)
+    {
+        const auto name = rawName.toLowerCase();
+        for (auto* bad : { "bass", "lead", "synth", "pad", "piano", "string", "guitar", "gitarre", "organ", "brass", "arp" })
+            if (name.contains(bad) && !name.contains("drum")) return false;
+        for (auto* hint : { "drum", "perc", "kick", "snare", "hihat", "hi-hat", "hi hat", "cymbal", "schlagzeug", "batterie", "beat", "tom" })
+            if (name.contains(hint)) return true;
+        if (noteCount < 8 || pitches.size() < 3 || pitches.size() > 16) return false;
+        int inRange = 0;
+        for (auto& p : pitches) if (p.first >= 35 && p.first <= 81) inRange += p.second;
+        if ((double)inRange / (double)noteCount < 0.95) return false;
+        if (durations.empty()) return false;
+        std::sort(durations.begin(), durations.end());
+        if (durations[durations.size() / 2] > 0.35) return false;
+        const bool kick = pitches.count(35) || pitches.count(36);
+        const bool snare = pitches.count(38) || pitches.count(40);
+        const bool hat = pitches.count(42) || pitches.count(44) || pitches.count(46);
+        return (kick && (snare || hat)) || (snare && hat);
+    }
+
     // Von analyzeMidiFile() UND listAllTracks() genutzte gemeinsame Notenstatistik: alle
     // Spuren (MTrk-Chunks) mit mindestens einer Note, unsortiert (Reihenfolge/Sortierung
     // obliegt dem jeweiligen Aufrufer - analyzeMidiFile sortiert nach Notendichte,
@@ -341,7 +365,7 @@ private:
             auto* track = parsedFile.getTrack(t);
             if (track == nullptr) continue;
 
-            struct ChanStat { int noteCount = 0; double pitchSum = 0.0; int program = -1; };
+            struct ChanStat { int noteCount = 0; double pitchSum = 0.0; int program = -1; std::map<int, int> pitches; std::vector<double> durations; };
             std::array<ChanStat, 17> chans;
             juce::String name;
             for (int i = 0; i < track->getNumEvents(); ++i)
@@ -356,6 +380,7 @@ private:
                     auto& c = chans[(size_t)juce::jlimit(1, 16, msg.getChannel())];
                     c.noteCount++;
                     c.pitchSum += msg.getNoteNumber();
+                    c.pitches[msg.getNoteNumber()]++;
                 }
                 else if (msg.isProgramChange())
                 {
@@ -364,6 +389,16 @@ private:
                 }
             }
 
+            {
+                juce::MidiMessageSequence seq(*track);
+                seq.updateMatchedPairs();
+                for (int i = 0; i < seq.getNumEvents(); ++i)
+                {
+                    auto* ev = seq.getEventPointer(i);
+                    if (ev != nullptr && ev->message.isNoteOn() && ev->noteOffObject != nullptr)
+                        chans[(size_t)juce::jlimit(1, 16, ev->message.getChannel())].durations.push_back(ev->noteOffObject->message.getTimeStamp() - ev->message.getTimeStamp());
+                }
+            }
             int channelsWithNotes = 0, onlyChannel = -1;
             for (int ch = 1; ch <= 16; ++ch)
                 if (chans[(size_t)ch].noteCount > 0) { ++channelsWithNotes; onlyChannel = ch; }
@@ -380,9 +415,11 @@ private:
                 cs.channelFilter = channelsWithNotes > 1 ? ch : 0;
                 cs.noteCount = c.noteCount;
                 cs.avgPitch = c.pitchSum / (double)c.noteCount;
+                cs.drums = ch == 10 || looksLikeDrums(name, c.noteCount, c.pitches, c.durations);
                 juce::String l = trackLabel;
                 if (channelsWithNotes > 1)
                     l << ", " << juce::String(juce::CharPointer_UTF8("Kanal ")) << ch << (ch == 10 ? " (Schlagzeug)" : juce::String());
+                if (cs.drums && ch != 10) l << " (Schlagzeug erkannt)";
                 cs.label = l + " (" + juce::String(c.noteCount)
                     + juce::String::fromUTF8(" Noten, Ø-Tonhöhe ")
                     + juce::String(cs.avgPitch, 1) + ")";
