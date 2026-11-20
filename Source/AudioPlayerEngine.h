@@ -86,6 +86,14 @@ public:
             // MIDI-Wiedergabe erzeugt hier bewusst keine eigene Audioausgabe mehr - die
             // Klangerzeugung übernimmt das externe MIDI-Ausgabegerät (siehe timerCallback()).
 
+            if (clickLeft > 0)       // metronome click: a short, quickly fading sine burst
+            {
+                const float env = (float) clickLeft / (float) clickTotal;
+                sampleValue += 0.18f * env * env * std::sin(clickPhase);
+                clickPhase += clickStep;
+                --clickLeft;
+            }
+
             leftBuffer[i] = sampleValue;
             if (rightBuffer != nullptr)
                 rightBuffer[i] = sampleValue;
@@ -167,6 +175,7 @@ public:
         traceTotalFrames = juce::jmax(1u, totalFrames);
         traceEndFrame = 0;
         traceLoop = false;
+        metroFrames = 0;
         sidFinished = false;
         isSidPlaying = true;
         isMidiPlaying = false;
@@ -198,6 +207,13 @@ public:
     bool     takeSidFinished() { const juce::ScopedLock sl(lock); const bool f = sidFinished; sidFinished = false; return f; }
     // where the tune ends (0 = at the end of the trace) and whether it then starts again at once, inside the audio thread
     // and without a pause (repeat): the song length of the HVSC is the loop point
+    // metronome for the tracker: a click on every beat (every framesPerBeat frames), the first of beatsPerBar louder;
+    // startBeat / offsetFrames place the beat grid when the playback does not start on a beat
+    void     setMetronome(uint32_t framesPerBeat, int beatsPerBar, int startBeat, uint32_t offsetFrames)
+    {
+        const juce::ScopedLock sl(lock);
+        metroFrames = framesPerBeat; metroBar = juce::jmax(1, beatsPerBar); metroStartBeat = startBeat; metroOffset = offsetFrames;
+    }
     void     setSidPlayRange(uint32_t endFrame, bool loop) { const juce::ScopedLock sl(lock); traceEndFrame = endFrame; traceLoop = loop; }
     // pause/resume of a SID tune started with playTrace()
     void     setSidPaused(bool paused) { const juce::ScopedLock sl(lock); if (traceTotalFrames > 0) isSidPlaying = ! paused; }
@@ -492,6 +508,7 @@ public:
         traceTotalFrames = 0;
         traceEndFrame = 0;
         traceLoop = false;
+        metroFrames = 0;
         framesPerSecond = 50.125;
 
         midiEvents.clear();
@@ -677,6 +694,14 @@ private:
     //==============================================================================
     void processNextSidFrame()
     {
+        if (metroFrames > 0 && ((uint32_t) currentFrameCounter + metroOffset) % metroFrames == 0)
+        {
+            const int beat = (int) (((uint32_t) currentFrameCounter + metroOffset) / metroFrames) + metroStartBeat;
+            const bool accent = beat % metroBar == 0;
+            clickTotal = clickLeft = (int) (currentSampleRate * 0.035);
+            clickPhase = 0.0f;
+            clickStep = (float) (2.0 * juce::MathConstants<double>::pi * (accent ? 1800.0 : 1100.0) / currentSampleRate);
+        }
         currentFrameCounter++;
 
         while (currentEventIndex < traceEvents.size() && traceEvents[currentEventIndex].frameIndex <= currentFrameCounter)
@@ -992,6 +1017,9 @@ private:
     float    sidClockHz = 985248.0f;     // PAL or NTSC system clock (pitch of the SID oscillators)
     std::atomic<int>   voiceMuteMask { 0 };   // bit n = voice n+1 muted
     std::atomic<float> outputGain { 1.0f };   // user volume
+    uint32_t metroFrames = 0, metroOffset = 0;   // metronome (0 = off)
+    int      metroBar = 4, metroStartBeat = 0, clickLeft = 0, clickTotal = 1;
+    float    clickPhase = 0.0f, clickStep = 0.0f;
     uint32_t traceEndFrame = 0;          // 0 = traceTotalFrames
     bool     traceLoop = false;
     uint32_t traceTotalFrames = 0;       // > 0: tune from playTrace(), ends after this many frames

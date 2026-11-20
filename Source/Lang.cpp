@@ -524,6 +524,14 @@ const Row kRows[] = {
     { "Eingefügt: %1 Zeilen", "Pasted: %1 rows", "Collé : %1 lignes" },
     { "Markierten Bereich kopieren (Strg + C)", "Copy the marked area (Ctrl + C)", "Copier la zone marquée (Ctrl + C)" },
     { "Einfügen (Strg + V)", "Paste (Ctrl + V)", "Coller (Ctrl + V)" },
+    { "Metronom", "Metronome", "Métronome" },
+    { "Metronom: ein Klick auf jeden Schlag (alle 4 Zeilen), der erste Schlag eines Takts (16 Zeilen) klingt höher", "Metronome: a click on every beat (every 4 rows), the first beat of a bar (16 rows) sounds higher", "Métronome : un clic à chaque temps (toutes les 4 lignes), le premier temps d’une mesure (16 lignes) est plus aigu" },
+    { "Im markierten Bereich (oder in dieser Zeile) sind keine Noten", "There are no notes in the marked area (or in this row)", "Il n’y a pas de notes dans la zone marquée (ou cette ligne)" },
+    { "%1 Noten um %2 Halbtöne verschoben", "%1 notes moved by %2 semitones", "%1 notes décalées de %2 demi-tons" },
+    { "Einen Halbton höher (Strg + ↑)", "One semitone up (Ctrl + ↑)", "Un demi-ton plus haut (Ctrl + ↑)" },
+    { "Einen Halbton tiefer (Strg + ↓)", "One semitone down (Ctrl + ↓)", "Un demi-ton plus bas (Ctrl + ↓)" },
+    { "Eine Oktave höher (Strg + Umschalt + ↑)", "One octave up (Ctrl + Shift + ↑)", "Une octave plus haut (Ctrl + Maj + ↑)" },
+    { "Eine Oktave tiefer (Strg + Umschalt + ↓)", "One octave down (Ctrl + Shift + ↓)", "Une octave plus bas (Ctrl + Maj + ↓)" },
     // ---- table end
 };
 

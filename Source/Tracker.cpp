@@ -213,6 +213,8 @@ private:
     juce::TextButton tabButtons[5], newBtn, openBtn, d64Btn, saveAsBtn, sidBtn, midiBtn, midiInBtn, playBtn, stopBtn, copyBtn, pasteBtn,
                      octMinus, octPlus, spdMinus, spdPlus;
     RepeatButton repeatBtn;                             // repeat the tune or the marked area
+    juce::TextButton metroBtn;                          // metronome click on every beat (off by default)
+    void applyMetronome();
     juce::uint32 playEndFrames = 0;
     int playEndRow = 0;
     juce::Label infoLabel, statusLabel, helpLabel, octLabel, spdLabel, titleLbl, authorLbl;
@@ -371,6 +373,34 @@ public:
         setSelection (v0, r0, v1, r1);
         panel.status (T ("Eingefügt: %1 Zeilen", c.rows));
     }
+    // transposes the notes of the marked area (or of the cursor row) by some semitones
+    void transpose (int d)
+    {
+        const int v0 = selActive ? sv0 : cv, v1 = selActive ? sv1 : cv, r0 = selActive ? sr0 : cr, r1 = selActive ? sr1 : cr;
+        std::map<int, std::vector<NpRow>> changed;
+        int n = 0;
+        for (int v = v0; v <= v1; ++v)
+        {
+            const auto list = panel.tune.trackList (v);
+            for (int r = r0; r <= r1 && r < (int) disp[(size_t) v].size(); ++r)
+            {
+                const auto& dr = disp[(size_t) v][(size_t) r];
+                if (dr.mark || dr.broken || dr.row.note == 0 || dr.row.note == 0x7e) continue;
+                const int seq = list[(size_t) dr.entry].seq;
+                auto it = changed.find (seq);
+                if (it == changed.end()) it = changed.emplace (seq, panel.tune.sequence (seq)).first;
+                if (dr.rowIn < (int) it->second.size())
+                {
+                    auto& note = it->second[(size_t) dr.rowIn].note;
+                    note = (juce::uint8) juce::jlimit (1, 95, (int) note + d);
+                    ++n;
+                }
+            }
+        }
+        if (n == 0) { panel.status (T ("Im markierten Bereich (oder in dieser Zeile) sind keine Noten")); return; }
+        panel.edit ([changed] (NpTune& t) { for (auto& kv : changed) t.setSequence (kv.first, kv.second); }, "transpose");
+        panel.status (T ("%1 Noten um %2 Halbtöne verschoben", n, d));
+    }
     void clearSelectedCells()
     {
         if (! selActive) return;
@@ -476,7 +506,8 @@ public:
             if (playHere) { g.setColour (juce::Colour (0xff2f9e44).withAlpha (0.35f)); g.fillRect (0, y, getWidth() - bar.getWidth(), rowH); }
             if (selActive && r >= sr0 && r <= sr1)
                 for (int v = sv0; v <= sv1; ++v) { g.setColour (th.accent.withAlpha (0.28f)); g.fillRect (voiceX (v) - 4, y, voiceW() - 4, rowH); }
-            g.setColour (th.dim);
+            if (r % 4 == 0) { g.setColour (th.text.withAlpha (r % 16 == 0 ? 0.30f : 0.13f)); g.drawHorizontalLine (y, 0.0f, (float) (getWidth() - bar.getWidth())); }   // beat / bar lines
+            g.setColour (r % 4 == 0 ? th.text.withAlpha (0.8f) : th.dim);
             g.drawText (juce::String::toHexString (r).paddedLeft ('0', 3).toUpperCase(), 4, y, gutter - 8, rowH, juce::Justification::centredRight, false);
             for (int v = 0; v < 3; ++v)
             {
@@ -1024,12 +1055,17 @@ void PatternView::showMenu (juce::Point<int> screen)
     m.addSeparator();
     m.addItem (7, T ("Markierten Bereich kopieren (Strg + C)"), selActive);
     m.addItem (8, T ("Einfügen (Strg + V)"), panel.clip.rows > 0);
+    m.addItem (9, T ("Einen Halbton höher (Strg + ↑)"));
+    m.addItem (10, T ("Einen Halbton tiefer (Strg + ↓)"));
+    m.addItem (11, T ("Eine Oktave höher (Strg + Umschalt + ↑)"));
+    m.addItem (12, T ("Eine Oktave tiefer (Strg + Umschalt + ↓)"));
     m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (juce::Rectangle<int> (screen.x, screen.y, 1, 1)), [safe = juce::Component::SafePointer<PatternView> (this)] (int r)
     {
         if (safe == nullptr) return;
         switch (r) { case 1: safe->insertRow(); break; case 2: safe->deleteRow(); break; case 3: safe->insertEntry(); break; case 4: safe->deleteEntry(); break;
                      case 5: safe->newSequenceForEntry(); break; case 6: safe->duplicateSequenceForEntry(); break;
-                     case 7: safe->copyToClip(); break; case 8: safe->pasteFromClip(); break; default: break; }
+                     case 7: safe->copyToClip(); break; case 8: safe->pasteFromClip(); break;
+                     case 9: safe->transpose (1); break; case 10: safe->transpose (-1); break; case 11: safe->transpose (12); break; case 12: safe->transpose (-12); break; default: break; }
     });
 }
 
@@ -1039,6 +1075,8 @@ bool PatternView::keyPressed (const juce::KeyPress& k)
     const auto mods = k.getModifiers();
     const auto ch = k.getTextCharacter();
     const bool ctrl = mods.isCommandDown();
+    if (ctrl && code == juce::KeyPress::upKey) { transpose (mods.isShiftDown() ? 12 : 1); return true; }
+    if (ctrl && code == juce::KeyPress::downKey) { transpose (mods.isShiftDown() ? -12 : -1); return true; }
     if (ctrl && (code == juce::KeyPress::insertKey)) { insertEntry(); return true; }
     if (ctrl && (code == juce::KeyPress::deleteKey)) { deleteEntry(); return true; }
     if (ctrl) return false;
@@ -1180,6 +1218,11 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     repeatBtn.setToggleState ((bool) main.archive().settings.getProperty ("trackerRepeat", false), juce::dontSendNotification);
     repeatBtn.setTooltip (T ("Wiederholen: den ganzen Tune oder den markierten Bereich immer wieder spielen"));
     repeatBtn.onClick = [this] { main.archive().settings.setProperty ("trackerRepeat", repeatBtn.getToggleState(), nullptr); main.notifySettings(); applyPlayRange(); };
+    addAndMakeVisible (metroBtn);
+    metroBtn.setButtonText (T ("Metronom"));
+    metroBtn.setClickingTogglesState (true);
+    metroBtn.setTooltip (T ("Metronom: ein Klick auf jeden Schlag (alle 4 Zeilen), der erste Schlag eines Takts (16 Zeilen) klingt höher"));
+    metroBtn.onClick = [this] { applyMetronome(); };
     for (auto* b : { &octMinus, &octPlus, &spdMinus, &spdPlus }) addAndMakeVisible (*b);
     octMinus.setButtonText ("-"); octPlus.setButtonText ("+"); spdMinus.setButtonText ("-"); spdPlus.setButtonText ("+");
     octMinus.onClick = [this] { setOctave (octave - 1); };
@@ -1350,7 +1393,15 @@ void TrackerPanel::play()
     playEndFrames = (juce::uint32) (rows * fpr);
     playEndRow = playStartRow + rows - 1;
     applyPlayRange();
+    applyMetronome();
     status ({});
+}
+
+void TrackerPanel::applyMetronome()
+{
+    if (! playing) return;
+    const juce::uint32 beat = (juce::uint32) (4 * playSpeed);
+    main.player().setMetronome (metroBtn.getToggleState() ? beat : 0u, 4, playStartRow / 4, (juce::uint32) ((playStartRow % 4) * playSpeed));
 }
 
 // the tune or the marked area ends after its last row; with repeat it starts again at once (inside the audio thread, without a pause)
@@ -1562,7 +1613,8 @@ void TrackerPanel::resized()
     auto row2 = r.removeFromTop (28);
     playBtn.setBounds (row2.removeFromLeft (118)); row2.removeFromLeft (4);
     stopBtn.setBounds (row2.removeFromLeft (44)); row2.removeFromLeft (4);
-    repeatBtn.setBounds (row2.removeFromLeft (40)); row2.removeFromLeft (22);
+    repeatBtn.setBounds (row2.removeFromLeft (40)); row2.removeFromLeft (4);
+    metroBtn.setBounds (row2.removeFromLeft (84)); row2.removeFromLeft (22);
     copyBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (4);
     pasteBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (22);
     spdMinus.setBounds (row2.removeFromLeft (28)); spdLabel.setBounds (row2.removeFromLeft (80)); spdPlus.setBounds (row2.removeFromLeft (28)); row2.removeFromLeft (12);
@@ -1668,6 +1720,7 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
         if (c == '@') { content->copySel(); continue; }
         if (c == '$') { content->pasteSel(); continue; }
         if (c == '%') { content->toggleMute (0); continue; }
+        if (c == '+') { content->pattern->transpose (1); continue; }
         int code = c;
         if (c == '_') code = juce::KeyPress::downKey; else if (c == '^') code = juce::KeyPress::upKey;
         else if (c == '>') code = juce::KeyPress::rightKey; else if (c == '<') code = juce::KeyPress::leftKey;
