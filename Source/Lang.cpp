@@ -545,6 +545,8 @@ const Row kRows[] = {
     { "Nach jeder Taste eine Zeile weiter. Aus: der Cursor bleibt stehen, nur der Notenwert an der Cursor-Position ändert sich", "One row further after every key. Off: the cursor stays, only the note value at the cursor position changes", "Une ligne plus loin après chaque touche. Désactivé : le curseur reste, seule la valeur de la note à la position du curseur change" },
     { "Angeschlossenes MIDI-Keyboard: seine Tasten klingen und schreiben die Note an die Cursor-Position", "Connected MIDI keyboard: its keys sound and write the note at the cursor position", "Clavier MIDI branché : ses touches sonnent et écrivent la note à la position du curseur" },
     { "Das MIDI-Gerät lässt sich nicht öffnen", "The MIDI device cannot be opened", "L’appareil MIDI ne peut pas être ouvert" },
+    { "Aufnahme: spielt den Tune (oder den markierten Bereich) und schreibt gespielte Tasten der Klaviatur oder des MIDI-Keyboards in die Zeile, die gerade spielt – in die Stimme des Cursors. Mit Wiederholen hörst du das Aufgenommene in der nächsten Runde", "Record: plays the tune (or the marked area) and writes keys you play on the keyboard or the MIDI keyboard into the row that is playing – in the cursor’s voice. With repeat you hear what you recorded in the next round", "Enregistrement : joue le morceau (ou la zone marquée) et écrit les touches jouées au clavier ou au clavier MIDI dans la ligne en cours de lecture – dans la voix du curseur. Avec la répétition, vous entendez l’enregistrement au tour suivant" },
+    { "Aufnahme läuft: Tasten spielen, die Noten landen in der Stimme %1", "Recording: play keys, the notes go into voice %1", "Enregistrement en cours : jouez des touches, les notes vont dans la voix %1" },
     // ---- table end
 };
 

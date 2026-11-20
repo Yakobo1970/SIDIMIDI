@@ -281,6 +281,7 @@ public:
     void pasteSel();
     void cutSel();
     void applyPlayRange();
+    void recordForTest() { recBtn.setToggleState (true, juce::dontSendNotification); updateRecColour(); }
     void showPianoForTest() { pianoBtn.setToggleState (true, juce::dontSendNotification); applyPianoVisibility(); }
     void holdKeyForTest (int note) { piano.setHeld (note, true); }
     // copied rows: up to three voices side by side
@@ -315,6 +316,10 @@ private:
                      octMinus, octPlus, spdMinus, spdPlus;
     RepeatButton repeatBtn;                             // repeat the tune or the marked area
     juce::TextButton metroBtn;                          // metronome click on every beat (off by default)
+    juce::TextButton recBtn;                            // record: played notes go to the row that plays now
+    juce::uint32 lastFrame = 0;
+    bool recording() const { return recBtn.getToggleState(); }
+    void updateRecColour() { recBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (recording() ? 0xffe0343b : 0xff6b2a2d)); recBtn.repaint(); }
     void applyMetronome();
     // ---- keyboard: the mouse or a connected MIDI keyboard plays a note and writes its value at the cursor
     PianoView piano;
@@ -419,6 +424,26 @@ public:
         cancelTyping();
         setNote (note);
         if (advance) move (0, 1);
+        return true;
+    }
+    // recording: the note goes to the given voice and row (the row that plays now); an empty instrument cell gets the instrument of the cursor
+    bool recordNote (int v, int r, int note, int instr)
+    {
+        if (v < 0 || v > 2 || r < 0 || r >= (int) disp[(size_t) v].size()) return false;
+        const auto& d = disp[(size_t) v][(size_t) r];
+        if (d.mark || d.broken) return false;
+        const int seq = panel.tune.trackList (v)[(size_t) d.entry].seq, ri = d.rowIn;
+        const bool setInstr = d.row.cmd == 0x80;
+        panel.edit ([seq, ri, note, instr, setInstr] (NpTune& t)
+        {
+            auto rows = t.sequence (seq);
+            if (ri < (int) rows.size())
+            {
+                rows[(size_t) ri].note = (juce::uint8) note;
+                if (setInstr) rows[(size_t) ri].cmd = (juce::uint8) (0xa0 + instr);
+                t.setSequence (seq, rows);
+            }
+        }, "record");
         return true;
     }
     int cursorTransposition() const
@@ -1376,6 +1401,22 @@ TrackerPanel::TrackerPanel (MainComponent& m, TrackerWindow& w) : main (m), wind
     repeatBtn.setToggleState ((bool) main.archive().settings.getProperty ("trackerRepeat", false), juce::dontSendNotification);
     repeatBtn.setTooltip (T ("Wiederholen: den ganzen Tune oder den markierten Bereich immer wieder spielen"));
     repeatBtn.onClick = [this] { main.archive().settings.setProperty ("trackerRepeat", repeatBtn.getToggleState(), nullptr); main.notifySettings(); applyPlayRange(); };
+    addAndMakeVisible (recBtn);
+    recBtn.setButtonText (juce::String::fromUTF8 ("●"));
+    recBtn.setClickingTogglesState (true);
+    recBtn.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff6b2a2d));
+    recBtn.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffe0343b));
+    recBtn.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffe9a3a6));
+    recBtn.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    recBtn.setTooltip (T ("Aufnahme: spielt den Tune (oder den markierten Bereich) und schreibt gespielte Tasten der Klaviatur oder des MIDI-Keyboards in die Zeile, die gerade spielt – in die Stimme des Cursors. Mit Wiederholen hörst du das Aufgenommene in der nächsten Runde"));
+    recBtn.onClick = [this]
+    {
+        updateRecColour();
+        if (! recBtn.getToggleState()) return;
+        if (! pianoBtn.getToggleState()) { pianoBtn.setToggleState (true, juce::sendNotification); }
+        if (! playing) play();
+        status (T ("Aufnahme läuft: Tasten spielen, die Noten landen in der Stimme %1", pattern->cursorVoice() + 1));
+    };
     addAndMakeVisible (metroBtn);
     metroBtn.setButtonText (T ("Metronom"));
     metroBtn.setClickingTogglesState (true);
@@ -1502,6 +1543,12 @@ void TrackerPanel::updateMidiIn()
 void TrackerPanel::pianoKey (int note, bool down)
 {
     piano.setHeld (note, down);
+    if (down && recording() && playing)             // recording: into the row that plays now, rounded to the nearest row
+    {
+        const int row = juce::jlimit (playStartRow, playEndRow, playStartRow + (int) std::lround ((double) main.player().getPlayFrame() / (double) playSpeed));
+        pattern->recordNote (pattern->cursorVoice(), row, note, pattern->instrumentAtCursor());
+        return;
+    }
     if (down)
     {
         if (! playing) audition (note);             // first, with the instrument that stands at the cursor
@@ -1660,6 +1707,7 @@ void TrackerPanel::play()
     for (int v = 0; v < 3; ++v) main.player().setVoiceMuted (v, muted[(size_t) v]);
     main.player().playTrace (*tr->events, tr->fps, tr->frames, 0, si.ntsc());
     playing = true;
+    lastFrame = 0;
     playSpeed = fpr;
     playEndFrames = (juce::uint32) (rows * fpr);
     playEndRow = playStartRow + rows - 1;
@@ -1712,7 +1760,12 @@ void TrackerPanel::timerCallback()
         pattern->setPlayRow (-1);
         return;
     }
-    pattern->setPlayRow (std::min (playEndRow, playStartRow + (int) (pl.getPlayFrame() / (juce::uint32) playSpeed)));
+    const auto frame = pl.getPlayFrame();
+    const bool wrapped = frame + 10 < lastFrame;
+    lastFrame = frame;
+    // recording with repeat: the loop has run round once, so the tune is built again and the new notes are heard
+    if (wrapped && recording() && repeatBtn.getToggleState()) { play(); return; }
+    pattern->setPlayRow (std::min (playEndRow, playStartRow + (int) (frame / (juce::uint32) playSpeed)));
 }
 
 // ---- files
@@ -1890,6 +1943,7 @@ void TrackerPanel::resized()
     playBtn.setBounds (row2.removeFromLeft (118)); row2.removeFromLeft (4);
     stopBtn.setBounds (row2.removeFromLeft (44)); row2.removeFromLeft (4);
     repeatBtn.setBounds (row2.removeFromLeft (40)); row2.removeFromLeft (4);
+    recBtn.setBounds (row2.removeFromLeft (40)); row2.removeFromLeft (4);
     metroBtn.setBounds (row2.removeFromLeft (84)); row2.removeFromLeft (22);
     copyBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (4);
     pasteBtn.setBounds (row2.removeFromLeft (92)); row2.removeFromLeft (22);
@@ -2010,6 +2064,7 @@ void TrackerWindow::setupForTest (const juce::File& tune, int row, int voice, bo
         if (c == '%') { content->toggleMute (0); continue; }
         if (c == '+') { content->pattern->transpose (1); continue; }
         if (c == '&') { content->showPianoForTest(); continue; }
+        if (c == '!') { content->recordForTest(); continue; }
         if (c == '?') { content->holdKeyForTest (52); continue; }
         int code = c;
         if (c == '_') code = juce::KeyPress::downKey; else if (c == '^') code = juce::KeyPress::upKey;
