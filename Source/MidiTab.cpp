@@ -171,7 +171,7 @@ public:
     TrackPickPanel (MainComponent& m, MidiTab& t, int idx, std::vector<Track> tr, std::array<int, 3> pre, bool tracker = false)
         : Overlay (m), tab (t), itemIndex (idx), tracks (std::move (tr)), toTracker (tracker)
     {
-        boxWidth = 960; boxHeight = 660;
+        boxWidth = tracker ? 1060 : 960; boxHeight = 660;
         voiceOf.assign (tracks.size(), 0);
         roleOf.assign (tracks.size(), 0);
         prioOf.assign (tracks.size(), 0);
@@ -237,6 +237,14 @@ public:
         timeLabel.setFont (font (15.0f, true));
         timeLabel.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (timeLabel);
+        seek.setSliderStyle (juce::Slider::LinearHorizontal);
+        seek.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        seek.setRange (0.0, std::max (1.0, total), 0.0);
+        seek.setTooltip (T ("Position des Vorhörens: ziehen oder anklicken. Auch bei laufender Wiedergabe"));
+        seek.onDragStart = [this] { seekDragging = true; };
+        seek.onValueChange = [this] { if (seekDragging) timeLabel.setText (formatTime (seek.getValue()) + " / " + formatTime (total), juce::dontSendNotification); };
+        seek.onDragEnd = [this] { seekDragging = false; seekTo (seek.getValue()); };
+        addAndMakeVisible (seek);
         help.setText (toTracker ? T ("Wähle bis zu drei Spuren für die drei Tracker-Oszillatoren (OSC1 ist der tiefste, OSC3 der höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar.")
                                 : T ("Wähle bis zu drei Spuren für die drei SID-Oszillatoren (OSC1 ist der tiefste, OSC3 der höchste) und gib jeder eine Rolle. Mit ▶ schaltest du Spuren zum Hören ein und aus, auch mehrere zugleich – grün heißt hörbar."),
                       juce::dontSendNotification);
@@ -272,7 +280,12 @@ public:
         auto top = b.removeFromTop (50);
         playBtn.setBounds (top.removeFromLeft (46)); top.removeFromLeft (4);
         stopBtn.setBounds (top.removeFromLeft (46)); top.removeFromLeft (10);
-        timeLabel.setBounds (top.removeFromLeft (120)); top.removeFromLeft (10);
+        {
+            auto col = top.removeFromLeft (170);
+            timeLabel.setBounds (col.removeFromTop (26));
+            seek.setBounds (col.removeFromTop (22));
+            top.removeFromLeft (10);
+        }
         if (toTracker) { sidSound.setBounds (top.removeFromLeft (104).withSizeKeepingCentre (104, 24)); top.removeFromLeft (10); }
         const int sw = (top.getWidth() - 12) / 3;
         for (int v = 0; v < 3; ++v) { scopes[v]->setBounds (top.removeFromLeft (sw)); top.removeFromLeft (6); }
@@ -287,7 +300,7 @@ public:
 
     // ---- list rows
     int getNumRows() override { return (int) tracks.size(); }
-    int roleWidth() const { return 146 + 106; }
+    int roleWidth() const { return 146 + 106 + (toTracker ? 56 : 0); }
     int groupSize (int v) const { int n = 0; for (int x : voiceOf) n += x == v && v > 0; return n; }
     // priorities are ranks inside a voice: 0 .. n-1 without gaps, ties by row
     void normalizePrio()
@@ -307,8 +320,7 @@ public:
         std::stable_sort (idx.begin(), idx.end(), [this] (size_t a, size_t b) { return prioOf[a] < prioOf[b]; });
         idx.insert (idx.begin() + std::min ((size_t) std::max (want, 0), idx.size()), row);
         for (size_t k = 0; k < idx.size(); ++k) prioOf[idx[k]] = (int) k;
-        list.updateContent();
-        list.repaint();
+        assignmentChanged();
     }
     // does another track play the same voice? Then the priority matters
     bool shared (size_t row) const
@@ -360,6 +372,15 @@ public:
         explicit Row (TrackPickPanel& p) : panel (p), version (p.menuVersion)
         {
             addAndMakeVisible (play); addAndMakeVisible (voice); addAndMakeVisible (role); addAndMakeVisible (prio);
+            if (p.toTracker)
+            {
+                addAndMakeVisible (prev); addAndMakeVisible (next);
+                prev.setButtonText ("<"); next.setButtonText (">");
+                prev.setTooltip (T ("Vorheriges Preset (bei Schlagzeug: Kit); am Anfang kommt die Rolle zurück"));
+                next.setTooltip (T ("Nächstes Preset (bei Schlagzeug: Kit); am Ende kommt die Rolle zurück"));
+                prev.onClick = [this] { panel.stepAssignment ((size_t) row, -1); };
+                next.onClick = [this] { panel.stepAssignment ((size_t) row, 1); };
+            }
             prio.setTextWhenNothingSelected (T ("Priorität"));
             prio.setTooltip (T ("Spielen mehrere Spuren denselben OSC, gewinnt bei gleichzeitigen Noten die Spur mit der höheren Priorität; die anderen füllen nur deren Pausen. Die Klänge der Spuren bleiben unterschiedlich (nur im Tracker)"));
             prio.onChange = [this] { if (prio.getSelectedId() > 0) panel.setRank ((size_t) row, prio.getSelectedId() - 1); };
@@ -378,6 +399,7 @@ public:
                 panel.list.updateContent();
                 panel.list.repaint();
                 panel.updateButton();
+                panel.assignmentChanged();
             };
             if (panel.toTracker && ! panel.presets.empty())      // presets of the instrument pool in place of a role
             {
@@ -406,6 +428,7 @@ public:
                 if (id >= 300) { panel.kitOf[(size_t) row] = id - 300; panel.presetOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = 4; }
                 else if (id >= 100) { panel.presetOf[(size_t) row] = id - 100; panel.kitOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = 0; }
                 else if (id > 0) { panel.presetOf[(size_t) row] = -1; panel.kitOf[(size_t) row] = -1; panel.roleOf[(size_t) row] = id - 1; }
+                panel.assignmentChanged();
             };
         }
         void set (int r)
@@ -447,6 +470,11 @@ public:
         {
             auto r = getLocalBounds().reduced (2, 3);
             play.setBounds (r.removeFromLeft (38)); r.removeFromLeft (4);
+            if (panel.toTracker)
+            {
+                next.setBounds (r.removeFromRight (24)); r.removeFromRight (2);
+                prev.setBounds (r.removeFromRight (24)); r.removeFromRight (4);
+            }
             role.setBounds (r.removeFromRight (140)); r.removeFromRight (6);
             prio.setBounds (r.removeFromRight (100)); r.removeFromRight (6);
             voice.setBounds (r.removeFromRight (110));
@@ -454,7 +482,7 @@ public:
         TrackPickPanel& panel;
         int version = 0;
         int row = 0;
-        juce::TextButton play;
+        juce::TextButton play, prev, next;
         juce::ComboBox voice, role, prio;
     };
 
@@ -499,7 +527,7 @@ public:
             safe->presetOf[row] = -1;
             safe->roleOf[row] = 4;
             ++safe->menuVersion;
-            safe->list.updateContent();
+            safe->assignmentChanged();
             safe->main.setStatus (T ("Drum-Kit „%1“ gespeichert", name));
         }), true);
     }
@@ -507,6 +535,47 @@ public:
     // ---- preview: tracks are switched on and off one by one; they sound together
     bool anyActive() const { for (auto a : active) if (a != 0) return true; return false; }
     double elapsedNow() const { return sidPlaying ? (double) main.player().getPlayFrame() / sidFps + sidOffset : main.player().getMidiElapsedSeconds(); }
+
+    // the listener sets the position: the playback goes on from there, or the next start begins there
+    void seekTo (double t)
+    {
+        pendingStart = juce::jlimit (0.0, total, t);
+        if (! anyActive() || ! main.player().isPlaying()) { updateTime(); return; }
+        if (pending > 0) { seekOverride = pendingStart; return; }                      // the tune is being built: it starts there
+        if (sidPlaying) main.player().seekFrame ((juce::uint32) std::max (0.0, (pendingStart - sidOffset) * sidFps));
+        else applyPreview (true, pendingStart);
+    }
+
+    // a change of role, preset, kit, OSC or priority is heard at once
+    void assignmentChanged()
+    {
+        if (toTracker && sidSound.getToggleState() && anyActive() && main.player().isPlaying()) applyPreview (true);
+        list.updateContent();
+        list.repaint();
+    }
+
+    // "<" / ">": the next preset (drums: the next kit); at the end the role comes back
+    void stepAssignment (size_t row, int dir)
+    {
+        if (roleOf[row] == 4 || kitOf[row] >= 0)
+        {
+            const int n = (int) kits.size();
+            int next = kitOf[row] + dir;
+            if (next < -1) next = n - 1;
+            if (next >= n) next = -1;
+            kitOf[row] = next; roleOf[row] = 4; presetOf[row] = -1;
+        }
+        else
+        {
+            const int n = (int) presets.size();
+            if (n == 0) return;
+            int next = presetOf[row] < 0 ? (dir > 0 ? 0 : n - 1) : presetOf[row] + dir;
+            if (next < 0 || next >= n) next = -1;
+            presetOf[row] = next; kitOf[row] = -1;
+            if (next >= 0) roleOf[row] = 0;
+        }
+        assignmentChanged();
+    }
 
     // the sound of the conversion: the tune is built from the tracks that are switched on (with their roles, presets and priorities),
     // played by the emulation, and it goes on at the point where the music was
@@ -526,7 +595,8 @@ public:
                 any = true;
             }
         if (! any) { main.player().stop(); sidPlaying = false; return; }
-        const double elapsed = wasAny && main.player().isPlaying() ? elapsedNow() : 0.0;
+        const double elapsed = wasAny && main.player().isPlaying() ? elapsedNow() : pendingStart;
+        seekOverride = -1.0;
         const int gen = ++generation;
         ++pending;
         const auto file = tab.item (itemIndex)->file;
@@ -552,7 +622,9 @@ public:
                 }
                 safe->tab.stopPreview();
                 safe->main.sidTab().stopPlayback();
-                safe->main.player().playTrace (*t->events, t->fps, t->frames, (juce::uint32) std::max (0.0, (elapsed - off) * t->fps), si.ntsc());
+                const double from = safe->seekOverride >= 0.0 ? safe->seekOverride : elapsed;
+                safe->seekOverride = -1.0;
+                safe->main.player().playTrace (*t->events, t->fps, t->frames, (juce::uint32) std::max (0.0, (from - off) * t->fps), si.ntsc());
                 safe->sidPlaying = true;
                 safe->sidOffset = off;
                 safe->sidFps = t->fps;
@@ -560,7 +632,7 @@ public:
         });
     }
 
-    void applyPreview (bool wasAny)
+    void applyPreview (bool wasAny, double startAt = -1.0)
     {
         if (toTracker && sidSound.getToggleState()) { applySidPreview (wasAny); return; }
         sidPlaying = false;
@@ -575,7 +647,7 @@ public:
             }
         if (sel.empty()) { main.player().stop(); return; }
         if (! wasAny) { tab.stopPreview(); main.sidTab().stopPlayback(); }
-        if (! main.player().setPreviewTracks (tab.item (itemIndex)->file, sel))
+        if (! main.player().setPreviewTracks (tab.item (itemIndex)->file, sel, startAt >= 0.0 ? startAt : (wasAny ? -1.0 : pendingStart)))
         {
             std::fill (active.begin(), active.end(), (char) 0);
             main.setStatus (T ("Die Spur lässt sich nicht vorhören"));
@@ -597,7 +669,7 @@ public:
         bool any = false;
         for (size_t i = 0; i < tracks.size(); ++i) { active[i] = voiceOf[i] > 0 ? 1 : 0; any = any || voiceOf[i] > 0; }
         if (! any) std::fill (active.begin(), active.end(), (char) 1);
-        main.player().stop();                                // from the beginning
+        main.player().stop();                                // from the position that is set
         sidPlaying = false;
         applyPreview (false);
         (void) was;
@@ -609,6 +681,7 @@ public:
     {
         ++generation;
         sidPlaying = false;
+        pendingStart = 0.0;
         std::fill (active.begin(), active.end(), (char) 0);
         main.player().stop();
         list.updateContent();
@@ -619,7 +692,10 @@ public:
     void updateTime()
     {
         const bool playing = anyActive() && main.player().isPlaying();
-        timeLabel.setText (formatTime (playing ? elapsedNow() : 0.0) + " / " + formatTime (total), juce::dontSendNotification);
+        if (seekDragging) return;
+        const double at = playing ? elapsedNow() : pendingStart;
+        timeLabel.setText (formatTime (at) + " / " + formatTime (total), juce::dontSendNotification);
+        seek.setValue (juce::jlimit (0.0, std::max (1.0, total), at), juce::dontSendNotification);
     }
 
     void timerCallback() override
@@ -627,6 +703,7 @@ public:
         if (anyActive() && pending == 0 && ! main.player().isPlaying())      // the music is over
         {
             sidPlaying = false;
+            pendingStart = 0.0;
             std::fill (active.begin(), active.end(), (char) 0);
             list.updateContent();
         }
@@ -721,6 +798,9 @@ private:
     juce::ListBox list;
     juce::TextButton convertBtn, cancelBtn, stopBtn, playBtn;
     juce::Label help, timeLabel;
+    juce::Slider seek;                             // the position of the preview: drag or click to set it
+    bool seekDragging = false;
+    double pendingStart = 0.0, seekOverride = -1.0;   // where the next start begins / a position chosen while the tune was being built
     juce::ToggleButton sidSound;                   // tracker: listen with the sound of the conversion (SID emulation) instead of the GM synth
     bool sidPlaying = false;
     double sidOffset = 0, sidFps = 50.1245;

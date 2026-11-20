@@ -407,7 +407,7 @@ public:
     // playback goes on - the time continues where it is. slot = the oscillator display (0-2) that follows the track.
     struct PreviewTrack { int trackIndex = 0; int channelFilter = 0; int slot = 0; };
 
-    bool setPreviewTracks(const juce::File& midiFile, const std::vector<PreviewTrack>& tracks)
+    bool setPreviewTracks(const juce::File& midiFile, const std::vector<PreviewTrack>& tracks, double startAt = -1.0)
     {
         if (tracks.empty()) { stop(); return true; }
 
@@ -417,6 +417,7 @@ public:
             const juce::ScopedLock sl(lock);
             continuing = isMidiPlaying && previewTrackIndex >= 0;
             if (continuing) elapsed = (juce::Time::getMillisecondCounterHiRes() - midiPlaybackStartMs) / 1000.0;
+            if (startAt >= 0.0) elapsed = startAt;                  // the listener moved the position
         }
 
         juce::FileInputStream inStream(midiFile);

@@ -598,6 +598,9 @@ const Row kRows[] = {
     { "Hi-Hat offen", "Hi-hat open", "Charleston ouvert" },
     { "Drum-Kit „%1“ gespeichert", "Drum kit “%1” saved", "Kit de batterie « %1 » enregistré" },
     { "Schlagzeug auf OSC%1: %2", "Drums on OSC%1: %2", "Batterie sur OSC%1 : %2" },
+    { "Position des Vorhörens: ziehen oder anklicken. Auch bei laufender Wiedergabe", "Position of the preview: drag or click. Also while it plays", "Position de l’écoute : faire glisser ou cliquer. Aussi pendant la lecture" },
+    { "Vorheriges Preset (bei Schlagzeug: Kit); am Anfang kommt die Rolle zurück", "Previous preset (drums: kit); at the start the role comes back", "Preset précédent (batterie : kit) ; au début, le rôle revient" },
+    { "Nächstes Preset (bei Schlagzeug: Kit); am Ende kommt die Rolle zurück", "Next preset (drums: kit); at the end the role comes back", "Preset suivant (batterie : kit) ; à la fin, le rôle revient" },
     // ---- table end
 };
 
