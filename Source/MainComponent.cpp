@@ -313,19 +313,23 @@ void MainComponent::paintLogo (juce::Graphics& g, juce::Rectangle<float> r) cons
 
 void MainComponent::paintTitle (juce::Graphics& g, juce::Rectangle<int> r, float height) const
 {
+    // two halves in the colours of the two tabs: SID (orange, SID>MIDI) and MIDI (cyan, MIDI>SID), the small i in between
     const auto& th = theme();
-    static const char* letters[] = { "S", "I", "D", "i", "M", "I", "D", "I" };
-    static const int colourOf[] = { 0, 7, 3, 2, 6, 1, 5, 4 };
     auto f = font (height, true);
-    g.setFont (f);
+    auto fi = font (height * 0.78f, true);
+    const float wS = juce::GlyphArrangement::getStringWidth (f, "SID"), wi = juce::GlyphArrangement::getStringWidth (fi, "i"), wM = juce::GlyphArrangement::getStringWidth (f, "MIDI");
     float x = (float) r.getX();
-    for (int i = 0; i < 8; ++i)
+    const float y = (float) r.getY(), h = (float) r.getHeight();
+    auto half = [&] (const juce::String& text, const juce::Font& font, float w, juce::Colour top, juce::Colour bottom)
     {
-        const float w = juce::GlyphArrangement::getStringWidth (f, letters[i]);
-        g.setColour (th.track[(size_t) colourOf[i]]);
-        g.drawText (letters[i], juce::Rectangle<float> (x, (float) r.getY(), w + 2.0f, (float) r.getHeight()), juce::Justification::centredLeft, false);
-        x += w - (i == 2 ? 1.0f : 0.0f);
-    }
+        g.setFont (font);
+        g.setGradientFill (juce::ColourGradient::vertical (top, y + h * 0.18f, bottom, y + h * 0.85f));
+        g.drawText (text, juce::Rectangle<float> (x, y, w + 2.0f, h), juce::Justification::centredLeft, false);
+        x += w;
+    };
+    half ("SID", f, wS - 1.0f, th.track[0].brighter (0.45f), th.track[0].darker (0.1f));
+    half ("i", fi, wi, juce::Colours::white.withAlpha (0.92f), juce::Colours::white.withAlpha (0.7f));
+    half ("MIDI", f, wM, th.track[1].brighter (0.45f), th.track[1].darker (0.1f));
 }
 
 void MainComponent::paint (juce::Graphics& g)
